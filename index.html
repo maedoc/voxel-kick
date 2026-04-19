@@ -147,7 +147,7 @@ const CHY    = 0.65;
 const CHZ    = 2.05;
 const GRAV   = -14.0;
 const C_ACC  = 56;           // car acceleration
-const C_MAX  = 58;           // car max speed
+const C_MAX  = 80;           // car max speed
 const C_TURN = 3.4;          // car turn speed (rad/s)
 const C_GFRI = 0.945;        // car ground friction
 const C_AFRI = 0.985;        // car air friction
@@ -157,7 +157,7 @@ const ACCEL_RAMP_T = 0.4;    // seconds to reach full acceleration
 const F_VEL  = 23;           // flip impulse
 const F_DUR  = 0.28;         // flip anim duration
 const B_ACC  = 78;           // boost acceleration
-const B_MAX  = 100;
+const B_MAX  = 135;
 const B_DRAIN= 0.65;
 const B_REGEN= 0.12;
 const B_REST = 0.82;         // ball restitution
@@ -389,9 +389,10 @@ function updateCar(c, input, dt){
     const f = fwd(c.rot);
     const right = new THREE.Vector3(Math.cos(c.rot),0,-Math.sin(c.rot));
 
-    // steering
-    if(input.left)  c.rot += C_TURN * dt;
-    if(input.right) c.rot -= C_TURN * dt;
+    // steering — proportional from joystick, full from keyboard
+    const steer = (input.steerAnalog !== undefined) ? input.steerAnalog :
+                  (input.left ? 1 : input.right ? -1 : 0);
+    c.rot += steer * C_TURN * dt;
 
     // acceleration direction
     const accDir = new THREE.Vector3();
@@ -730,7 +731,7 @@ function updateCamera(dt){
 }
 
 /* ===== PLAYER INPUT ===== */
-const touchState = { forward:false, backward:false, left:false, right:false, jump:false, boost:false };
+const touchState = { forward:false, backward:false, left:false, right:false, jump:false, boost:false, joyX:0, joyY:0 };
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 if(isTouchDevice){
@@ -792,13 +793,15 @@ if(isTouchDevice){
         joystickKnob.style.left = `calc(50% + ${dx}px)`;
         joystickKnob.style.top  = `calc(50% + ${dy}px)`;
 
-        // map to directional input
+        // map to directional input — both axes independently and simultaneously
         const normX = dx / JOY_MAX_R;
         const normY = dy / JOY_MAX_R;
-        touchState.left     = normX < -0.25;
-        touchState.right    = normX >  0.25;
-        touchState.forward  = normY < -0.25;   // drag up → forward
-        touchState.backward = normY >  0.25;   // drag down → backward
+        touchState.joyX = normX;
+        touchState.joyY = normY;
+        touchState.left     = normX < -0.15;
+        touchState.right    = normX >  0.15;
+        touchState.forward  = normY < -0.15;   // drag up → forward
+        touchState.backward = normY >  0.15;   // drag down → backward
     }, { passive: false });
 
     function resetJoystick(){
@@ -810,6 +813,8 @@ if(isTouchDevice){
         touchState.backward = false;
         touchState.left     = false;
         touchState.right    = false;
+        touchState.joyX = 0;
+        touchState.joyY = 0;
     }
     document.addEventListener('touchend', e => {
         if(joyTouchId === null) return;
@@ -826,11 +831,18 @@ if(isTouchDevice){
 }
 
 function getPlayerInput(){
+    // Analog steering: joystick X gives proportional turn rate
+    // Keyboard gives full -1 / 0 / +1
+    let steerAnalog = 0;
+    if(touchState.left || touchState.right) steerAnalog = touchState.joyX;
+    if(keys['KeyA'] || keys['ArrowLeft'])   steerAnalog = 1;
+    if(keys['KeyD'] || keys['ArrowRight'])  steerAnalog = -1;
     return {
         forward:  keys['KeyW'] || keys['ArrowUp']    || touchState.forward,
         backward: keys['KeyS'] || keys['ArrowDown']   || touchState.backward,
         left:     keys['KeyA'] || keys['ArrowLeft']   || touchState.left,
         right:    keys['KeyD'] || keys['ArrowRight']  || touchState.right,
+        steerAnalog,
         jump:     keys['Space']                       || touchState.jump,
         boost:    keys['ShiftLeft'] || keys['ShiftRight'] || touchState.boost
     };
