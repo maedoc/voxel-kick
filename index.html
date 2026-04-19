@@ -49,6 +49,35 @@ canvas { display: block; }
 }
 #touch-controls.active { display: block; }
 
+/* Virtual joystick */
+#joystick-zone {
+    position: absolute; left: 0; top: 0;
+    width: 50%; height: 100%;
+    pointer-events: auto;
+    touch-action: none;
+}
+#joystick-base {
+    position: absolute;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    border: 2px solid rgba(255,255,255,0.3);
+    display: none;
+    pointer-events: none;
+    z-index: 11;
+}
+#joystick-knob {
+    position: absolute;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    border: 2px solid rgba(255,255,255,0.5);
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+/* Action buttons (right side) */
 .touch-btn {
     position: absolute; pointer-events: auto;
     border-radius: 50%; border: 2px solid rgba(255,255,255,0.4);
@@ -61,19 +90,6 @@ canvas { display: block; }
     transition: background 0.1s;
 }
 .touch-btn.pressed { background: rgba(255,255,255,0.35); border-color: rgba(255,255,255,0.7); }
-
-/* D-pad container */
-#touch-controls .dpad {
-    position: absolute; left: 16px; bottom: 36px;
-    width: 140px; height: 180px;
-}
-#touch-controls .dpad .touch-btn { position: absolute; }
-.dpad #btn-up    { left: 38px; bottom: 124px; width: 64px; height: 56px; border-radius: 14px; }
-.dpad #btn-down  { left: 38px; bottom: 0;     width: 64px; height: 56px; border-radius: 14px; }
-.dpad #btn-left  { left: 0;    bottom: 34px;  width: 56px; height: 56px; border-radius: 14px; }
-.dpad #btn-right { left: 84px; bottom: 34px;  width: 56px; height: 56px; border-radius: 14px; }
-
-/* Action buttons (right side) */
 .action-btns {
     position: absolute; right: 16px; bottom: 36px;
     width: 100px; height: 180px;
@@ -98,12 +114,8 @@ canvas { display: block; }
     <div id="goal-overlay">GOAL!</div>
 
     <div id="touch-controls">
-        <div class="dpad">
-            <div class="touch-btn" id="btn-up">▲</div>
-            <div class="touch-btn" id="btn-down">▼</div>
-            <div class="touch-btn" id="btn-left">◄</div>
-            <div class="touch-btn" id="btn-right">►</div>
-        </div>
+        <div id="joystick-zone"></div>
+        <div id="joystick-base"><div id="joystick-knob"></div></div>
         <div class="action-btns">
             <div class="touch-btn" id="btn-jump">JUMP</div>
             <div class="touch-btn" id="btn-boost">BOOST</div>
@@ -123,12 +135,12 @@ import * as THREE from 'three';
 
 /* ===== CONSTANTS ===== */
 const V      = 0.3;          // voxel size
-const AW     = 72;           // arena width  (X)
-const AL     = 110;          // arena length (Z)
-const AH     = 30;           // arena height (Y)
-const GW     = 18;           // goal width
-const GH     = 12;           // goal height
-const GD     = 8;            // goal depth
+const AW     = 108;          // arena width  (X)  — 72×1.5
+const AL     = 165;          // arena length (Z)  — 110×1.5
+const AH     = 45;           // arena height (Y)  — 30×1.5
+const GW     = 27;           // goal width        — 18×1.5
+const GH     = 18;           // goal height       — 12×1.5
+const GD     = 12;           // goal depth        — 8×1.5
 const BR     = 1.5;          // ball radius
 const CHX    = 1.05;         // car half-extents
 const CHY    = 0.65;
@@ -139,7 +151,9 @@ const C_MAX  = 58;           // car max speed
 const C_TURN = 3.4;          // car turn speed (rad/s)
 const C_GFRI = 0.945;        // car ground friction
 const C_AFRI = 0.985;        // car air friction
-const J_VEL  = 18;           // jump velocity
+const J_VEL  = 14;           // jump velocity (reduced to ~60% of old 18)
+const J_CUT  = 0.55;         // variable jump: velocity kept on quick release
+const ACCEL_RAMP_T = 0.4;    // seconds to reach full acceleration
 const F_VEL  = 23;           // flip impulse
 const F_DUR  = 0.28;         // flip anim duration
 const B_ACC  = 78;           // boost acceleration
@@ -158,9 +172,9 @@ const GOAL_CD= 2.0;          // goal cooldown seconds
 /* ===== THREE SETUP ===== */
 const scene    = new THREE.Scene();
 scene.background = new THREE.Color(0xE0F2F1);
-scene.fog      = new THREE.FogExp2(0xE0F2F1, 0.003);
+scene.fog      = new THREE.FogExp2(0xE0F2F1, 0.002);
 
-const camera   = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 250);
+const camera   = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 350);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -170,11 +184,11 @@ document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-sun.position.set(15, 35, 10);
+sun.position.set(20, 50, 15);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera;
-sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 1; sc.far = 120;
+sc.left = -110; sc.right = 110; sc.top = 110; sc.bottom = -110; sc.near = 1; sc.far = 180;
 scene.add(sun);
 
 window.addEventListener('resize', () => {
@@ -263,7 +277,7 @@ function createArena(){
     const lm = new THREE.MeshBasicMaterial({color:0xffffff});
     const cl = new THREE.Mesh(new THREE.PlaneGeometry(.2,AL), lm);
     cl.rotation.x=-Math.PI/2; cl.position.y=.02; scene.add(cl);
-    const cc = new THREE.Mesh(new THREE.RingGeometry(9,9.2,48), new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));
+    const cc = new THREE.Mesh(new THREE.RingGeometry(13.5,13.7,48), new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));
     cc.rotation.x=-Math.PI/2; cc.position.y=.02; scene.add(cc);
 
     const wm = new THREE.MeshLambertMaterial({color:0xFFB3BA, transparent:true, opacity:0.25, side:THREE.DoubleSide});
@@ -317,8 +331,8 @@ function createArena(){
 }
 
 /* ===== GAME STATE ===== */
-const player = { pos:new THREE.Vector3(0,CHY,20), vel:new THREE.Vector3(), rot:Math.PI, onGround:true, canFlip:false, isFlipping:false, flipTimer:0, flipType:'', boost:B_MAX, jumpHeld:false, flipHit:false };
-const ai     = { pos:new THREE.Vector3(0,CHY,-20), vel:new THREE.Vector3(), rot:0, onGround:true, canFlip:false, isFlipping:false, flipTimer:0, flipType:'', boost:B_MAX, jumpHeld:false, flipHit:false };
+const player = { pos:new THREE.Vector3(0,CHY,30), vel:new THREE.Vector3(), rot:Math.PI, onGround:true, canFlip:false, isFlipping:false, flipTimer:0, flipType:'', boost:B_MAX, jumpHeld:false, flipHit:false, accelRamp:0 };
+const ai     = { pos:new THREE.Vector3(0,CHY,-30), vel:new THREE.Vector3(), rot:0, onGround:true, canFlip:false, isFlipping:false, flipTimer:0, flipType:'', boost:B_MAX, jumpHeld:false, flipHit:false, accelRamp:0 };
 const ball   = { pos:new THREE.Vector3(0,BR,0), vel:new THREE.Vector3(), angVel:new THREE.Vector3() };
 
 let pScore=0, aScore=0, goalCD=0, lastTime=0;
@@ -357,15 +371,22 @@ function updateCar(c, input, dt){
     if(input.left)  c.rot += C_TURN * dt;
     if(input.right) c.rot -= C_TURN * dt;
 
-    // acceleration
+    // acceleration direction
     const accDir = new THREE.Vector3();
     if(input.forward)  accDir.add(f);
     if(input.backward) accDir.sub(f);
 
-    let accMag = C_ACC;
-    // boost
+    // gradual acceleration ramp (0→1 over ACCEL_RAMP_T seconds)
+    if(accDir.lengthSq() > 0){
+        c.accelRamp = Math.min(1, c.accelRamp + dt / ACCEL_RAMP_T);
+    } else {
+        c.accelRamp = Math.max(0, c.accelRamp - dt / (ACCEL_RAMP_T * 0.5));
+    }
+
+    let accMag = C_ACC * c.accelRamp;
+    // boost (also scaled by ramp)
     if(input.boost && c.boost > 0 && input.forward){
-        accMag = B_ACC;
+        accMag = B_ACC * c.accelRamp;
         c.boost = Math.max(0, c.boost - B_DRAIN);
     } else {
         c.boost = Math.min(B_MAX, c.boost + B_REGEN);
@@ -387,7 +408,7 @@ function updateCar(c, input, dt){
     const fric = c.onGround ? C_GFRI : C_AFRI;
     c.vel.x *= fric; c.vel.z *= fric;
 
-    // jump / flip
+    // jump / flip  —  variable height via release-to-cut
     if(input.jump){
         if(c.onGround && !c.jumpHeld){
             c.vel.y = J_VEL;
@@ -410,6 +431,10 @@ function updateCar(c, input, dt){
             c.jumpHeld = true;
         }
     } else {
+        // Variable jump: releasing early cuts upward velocity for a short hop
+        if(c.jumpHeld && !c.onGround && c.vel.y > 0 && c.canFlip){
+            c.vel.y *= J_CUT;
+        }
         c.jumpHeld = false;
     }
 
@@ -420,7 +445,7 @@ function updateCar(c, input, dt){
     c.pos.addScaledVector(c.vel, dt);
 
     // ground
-    if(c.pos.y - CHY < 0){ c.pos.y=CHY; c.vel.y=0; c.onGround=true; c.canFlip=false; c.isFlipping=false; c.flipHit=false; }
+    if(c.pos.y - CHY < 0){ c.pos.y=CHY; c.vel.y=0; c.onGround=true; c.canFlip=false; c.isFlipping=false; c.flipHit=false; c.accelRamp=0; }
 
     // walls (car uses max half-extent for simplicity)
     const cr = Math.max(CHX, CHZ);
@@ -573,10 +598,10 @@ function showGoal(){
 
 function resetPositions(){
     ball.pos.set(0,BR,0); ball.vel.set(0,0,0);
-    player.pos.set(0,CHY,20); player.vel.set(0,0,0); player.rot=Math.PI;
-    player.onGround=true; player.canFlip=false; player.isFlipping=false; player.flipHit=false;
-    ai.pos.set(0,CHY,-20); ai.vel.set(0,0,0); ai.rot=0;
-    ai.onGround=true; ai.canFlip=false; ai.isFlipping=false; ai.flipHit=false;
+    player.pos.set(0,CHY,30); player.vel.set(0,0,0); player.rot=Math.PI;
+    player.onGround=true; player.canFlip=false; player.isFlipping=false; player.flipHit=false; player.accelRamp=0;
+    ai.pos.set(0,CHY,-30); ai.vel.set(0,0,0); ai.rot=0;
+    ai.onGround=true; ai.canFlip=false; ai.isFlipping=false; ai.flipHit=false; ai.accelRamp=0;
 }
 
 /* ===== AI ===== */
@@ -658,8 +683,8 @@ function updateBallMesh(){
 }
 
 /* ===== CAMERA ===== */
-const camOffset = new THREE.Vector3(0, 8, -16);
-const camLookOffset = new THREE.Vector3(0, 1.5, 10);
+const camOffset = new THREE.Vector3(0, 12, -24);
+const camLookOffset = new THREE.Vector3(0, 2, 15);
 const camPos = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
 
@@ -687,21 +712,91 @@ if(isTouchDevice){
     document.getElementById('hint').style.display = 'none';
     document.getElementById('boost-wrap').style.bottom = '230px';
 
-    const btnMap = {
-        'btn-up':    'forward',
-        'btn-down':  'backward',
-        'btn-left':  'left',
-        'btn-right': 'right',
+    // --- Action buttons (jump / boost) ---
+    const actionBtnMap = {
         'btn-jump':  'jump',
         'btn-boost': 'boost'
     };
-
-    for(const[id, key] of Object.entries(btnMap)){
+    for(const [id, key] of Object.entries(actionBtnMap)){
         const el = document.getElementById(id);
         el.addEventListener('touchstart', e=>{ e.preventDefault(); touchState[key]=true; el.classList.add('pressed'); }, {passive:false});
         el.addEventListener('touchend',   e=>{ e.preventDefault(); touchState[key]=false; el.classList.remove('pressed'); }, {passive:false});
         el.addEventListener('touchcancel',e=>{ touchState[key]=false; el.classList.remove('pressed'); });
     }
+
+    // --- Floating virtual joystick ---
+    const joystickZone = document.getElementById('joystick-zone');
+    const joystickBase = document.getElementById('joystick-base');
+    const joystickKnob = document.getElementById('joystick-knob');
+    let joyTouchId = null;
+    let joyCenter  = { x: 0, y: 0 };
+    const JOY_MAX_R  = 55;   // max drag radius (px)
+    const JOY_DEAD   = 10;   // dead zone (px)
+
+    joystickZone.addEventListener('touchstart', e => {
+        e.preventDefault();
+        if(joyTouchId !== null) return;               // already tracking a finger
+        const t = e.changedTouches[0];
+        joyTouchId = t.identifier;
+        joyCenter  = { x: t.clientX, y: t.clientY };
+        // show base circle at touch point
+        joystickBase.style.display = 'block';
+        joystickBase.style.left = (joyCenter.x - 70) + 'px';
+        joystickBase.style.top  = (joyCenter.y - 70) + 'px';
+        joystickKnob.style.left = '50%';
+        joystickKnob.style.top  = '50%';
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
+        if(joyTouchId === null) return;
+        let joyTouch = null;
+        for(const t of e.changedTouches){
+            if(t.identifier === joyTouchId){ joyTouch = t; break; }
+        }
+        if(!joyTouch) return;
+        e.preventDefault();
+
+        let dx = joyTouch.clientX - joyCenter.x;
+        let dy = joyTouch.clientY - joyCenter.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if(dist > JOY_MAX_R){
+            dx = dx / dist * JOY_MAX_R;
+            dy = dy / dist * JOY_MAX_R;
+        }
+        joystickKnob.style.left = `calc(50% + ${dx}px)`;
+        joystickKnob.style.top  = `calc(50% + ${dy}px)`;
+
+        // map to directional input
+        const normX = dx / JOY_MAX_R;
+        const normY = dy / JOY_MAX_R;
+        touchState.left     = normX < -0.25;
+        touchState.right    = normX >  0.25;
+        touchState.forward  = normY < -0.25;   // drag up → forward
+        touchState.backward = normY >  0.25;   // drag down → backward
+    }, { passive: false });
+
+    function resetJoystick(){
+        joyTouchId = null;
+        joystickBase.style.display = 'none';
+        joystickKnob.style.left = '50%';
+        joystickKnob.style.top  = '50%';
+        touchState.forward  = false;
+        touchState.backward = false;
+        touchState.left     = false;
+        touchState.right    = false;
+    }
+    document.addEventListener('touchend', e => {
+        if(joyTouchId === null) return;
+        for(const t of e.changedTouches){
+            if(t.identifier === joyTouchId){ resetJoystick(); return; }
+        }
+    });
+    document.addEventListener('touchcancel', e => {
+        if(joyTouchId === null) return;
+        for(const t of e.changedTouches){
+            if(t.identifier === joyTouchId){ resetJoystick(); return; }
+        }
+    });
 }
 
 function getPlayerInput(){
