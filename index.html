@@ -171,8 +171,23 @@ const GOAL_CD= 2.0;          // goal cooldown seconds
 
 /* ===== THREE SETUP ===== */
 const scene    = new THREE.Scene();
-scene.background = new THREE.Color(0xE0F2F1);
-scene.fog      = new THREE.FogExp2(0xE0F2F1, 0.002);
+// Sky gradient background
+(function(){
+    const c = document.createElement('canvas'); c.width=2; c.height=512;
+    const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0,0,0,512);
+    g.addColorStop(0,   '#1a3a5c');  // deep sky top
+    g.addColorStop(0.3, '#4a90d9');  // mid blue
+    g.addColorStop(0.55,'#87CEEB');  // light sky
+    g.addColorStop(0.75,'#b8e4f0');  // pale horizon
+    g.addColorStop(1,   '#e8f4e8');  // ground haze
+    ctx.fillStyle = g; ctx.fillRect(0,0,2,512);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = tex;
+})();
+const FOG_COLOR = 0x9dd4e8;
+scene.fog      = new THREE.FogExp2(FOG_COLOR, 0.0018);
 
 const camera   = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 350);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -266,12 +281,19 @@ function buildBall(){
 
 /* ===== ARENA ===== */
 function createArena(){
-    // floor
+    // arena floor (inside the stadium)
     const floorGeo = new THREE.PlaneGeometry(AW, AL, 1, 1);
     const floorMat = new THREE.MeshLambertMaterial({color:0xA8E6CF});
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x=-Math.PI/2; floor.receiveShadow=true;
+    floor.rotation.x=-Math.PI/2; floor.position.y=0.01; floor.receiveShadow=true;
     scene.add(floor);
+
+    // ground plane extending beyond the stadium (grass)
+    const groundGeo = new THREE.PlaneGeometry(800, 800, 1, 1);
+    const groundMat = new THREE.MeshLambertMaterial({color:0x5a9e4b});
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI/2; ground.position.y = -0.05; ground.receiveShadow = true;
+    scene.add(ground);
 
     // field markings
     const lm = new THREE.MeshBasicMaterial({color:0xffffff});
@@ -444,8 +466,12 @@ function updateCar(c, input, dt){
     // integrate
     c.pos.addScaledVector(c.vel, dt);
 
-    // ground
-    if(c.pos.y - CHY < 0){ c.pos.y=CHY; c.vel.y=0; c.onGround=true; c.canFlip=false; c.isFlipping=false; c.flipHit=false; c.accelRamp=0; }
+    // ground — only reset accelRamp on actual landing (air→ground transition)
+    if(c.pos.y - CHY < 0){
+        const wasAir = !c.onGround;
+        c.pos.y=CHY; c.vel.y=0; c.onGround=true; c.canFlip=false; c.isFlipping=false; c.flipHit=false;
+        if(wasAir) c.accelRamp=0;
+    }
 
     // walls (car uses max half-extent for simplicity)
     const cr = Math.max(CHX, CHZ);
