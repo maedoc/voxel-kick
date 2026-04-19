@@ -147,7 +147,7 @@ const CHY    = 0.65;
 const CHZ    = 2.05;
 const GRAV   = -14.0;
 const C_ACC  = 56;           // car acceleration
-const C_MAX  = 80;           // car max speed
+const C_MAX  = 104;          // car max speed
 const C_TURN = 3.4;          // car turn speed (rad/s)
 const C_GFRI = 0.945;        // car ground friction
 const C_AFRI = 0.985;        // car air friction
@@ -157,7 +157,7 @@ const ACCEL_RAMP_T = 0.4;    // seconds to reach full acceleration
 const F_VEL  = 23;           // flip impulse
 const F_DUR  = 0.28;         // flip anim duration
 const B_ACC  = 78;           // boost acceleration
-const B_MAX  = 135;
+const B_MAX  = 175;
 const B_DRAIN= 0.65;
 const B_REGEN= 0.12;
 const B_REST = 0.82;         // ball restitution
@@ -365,6 +365,85 @@ window.addEventListener('keyup', e=>{ keys[e.code]=false; });
 
 /* ===== CREATE MESHES ===== */
 createArena();
+
+/* ===== SCENERY (trees + grandstands) ===== */
+(function createScenery(){
+    // --- TREES ---
+    const trunkGeo = new THREE.BoxGeometry(1.2, 4, 1.2);
+    const trunkMat = new THREE.MeshLambertMaterial({color:0x8B5E3C});
+    const canopyGeo = new THREE.BoxGeometry(4, 3.5, 4);
+    const canopyMat = new THREE.MeshLambertMaterial({color:0x2E7D32});
+    const canopy2Geo = new THREE.BoxGeometry(3, 2.5, 3);
+
+    // tree positions scattered around the arena
+    const trees = [
+        {x:-70, z:-80}, {x: 70, z:-80}, {x:-70, z: 80}, {x: 70, z: 80},
+        {x:-90, z:-40}, {x: 90, z:-40}, {x:-90, z: 40}, {x: 90, z: 40},
+        {x:-55, z:-110}, {x: 55, z:-110}, {x:-55, z:110}, {x: 55, z:110},
+        {x:-110, z: 0}, {x: 110, z: 0},
+        {x:-100, z:-70}, {x: 100, z:-70}, {x:-100, z: 70}, {x: 100, z: 70},
+        {x:  0, z:-120}, {x:  0, z: 120},
+        {x:-120, z:-30}, {x: 120, z: 30}, {x:-30, z: 100}, {x: 30, z:-100},
+    ];
+    trees.forEach(p => {
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.set(p.x, 2, p.z);
+        trunk.castShadow = true;
+        scene.add(trunk);
+        const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+        canopy.position.set(p.x, 5.5, p.z);
+        canopy.castShadow = true;
+        scene.add(canopy);
+        const top = new THREE.Mesh(canopy2Geo, canopyMat);
+        top.position.set(p.x, 8, p.z);
+        top.castShadow = true;
+        scene.add(top);
+    });
+
+    // --- GRANDSTANDS (along both long sides) ---
+    const standGeo = new THREE.BoxGeometry(AW * 0.8, 8, 6);
+    const standMat = new THREE.MeshLambertMaterial({color:0x888888});
+    // Left grandstand
+    const standL = new THREE.Mesh(standGeo, standMat);
+    standL.position.set(0, 4, -AL/2 - 12);
+    standL.castShadow = true; standL.receiveShadow = true;
+    scene.add(standL);
+    // Right grandstand
+    const standR = new THREE.Mesh(standGeo, standMat);
+    standR.position.set(0, 4, AL/2 + 12);
+    standR.castShadow = true; standR.receiveShadow = true;
+    scene.add(standR);
+
+    // Spectators — instanced colored cubes on the grandstand rows
+    const specGeo = new THREE.BoxGeometry(1.2, 1.8, 1.2);
+    const specColors = [0xe53935, 0x1E88E5, 0xFDD835, 0x43A047, 0xFF6F00, 0x8E24AA, 0xffffff];
+    // Use one InstancedMesh per color for performance
+    const rowCount = 3, colCount = 30;
+    specColors.forEach((color, ci) => {
+        const mat = new THREE.MeshLambertMaterial({color});
+        const count = rowCount * colCount;
+        const mesh = new THREE.InstancedMesh(specGeo, mat, count);
+        const dummy = new THREE.Object3D();
+        let idx = 0;
+        for(let side of [-1, 1]){
+            const baseZ = side * (AL/2 + 12);
+            for(let row = 0; row < rowCount; row++){
+                for(let col = 0; col < Math.floor(colCount / 2); col++){
+                    if(idx >= count) break;
+                    const x = (col - colCount/4) * 2.8 + (Math.random()-0.5)*0.4;
+                    const y = 8.5 + row * 2.2 + (Math.random()-0.5)*0.3;
+                    const z = baseZ + side * (1 + row * 1.8);
+                    dummy.position.set(x, y, z);
+                    dummy.updateMatrix();
+                    mesh.setMatrixAt(idx++, dummy.matrix);
+                }
+            }
+        }
+        mesh.count = idx;
+        mesh.instanceMatrix.needsUpdate = true;
+        scene.add(mesh);
+    });
+})();
 
 const pCarMesh = makeVoxelMesh(buildCar({r:.45,g:.73,b:1},{r:.35,g:.6,b:.9}));
 scene.add(pCarMesh);
@@ -834,7 +913,7 @@ function getPlayerInput(){
     // Analog steering: joystick X gives proportional turn rate
     // Keyboard gives full -1 / 0 / +1
     let steerAnalog = 0;
-    if(touchState.left || touchState.right) steerAnalog = touchState.joyX;
+    if(touchState.left || touchState.right) steerAnalog = -touchState.joyX;  // negate: right joy → positive → rot increases = right turn
     if(keys['KeyA'] || keys['ArrowLeft'])   steerAnalog = 1;
     if(keys['KeyD'] || keys['ArrowRight'])  steerAnalog = -1;
     return {
