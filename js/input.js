@@ -129,20 +129,24 @@ export function getPlayerInput(dt) {
     const kbUp    = keys['KeyW'] || keys['ArrowUp'];
     const kbDown  = keys['KeyS'] || keys['ArrowDown'];
 
-    let steerAnalog = 0;
+    let targetSteer = 0;
     const joyActive = touchState.left || touchState.right;
     const kbActive  = kbLeft || kbRight;
 
     if (joyActive && !kbActive) {
-        steerAnalog = -touchState.joyX;
+        targetSteer = -touchState.joyX;
     } else if (kbActive) {
-        if (kbLeft)  steerAnalog = 1;
-        if (kbRight) steerAnalog = -1;
+        if (kbLeft)  targetSteer = 1;
+        if (kbRight) targetSteer = -1;
     }
 
-    /* smooth toward target */
-    const step = (dt !== undefined) ? STEER_SMOOTH_RATE * dt : 1;
-    steerAnalogSmoothed += (steerAnalog - steerAnalogSmoothed) * Math.min(step, 1);
+    /* keyboard is instant; joystick only is smoothed */
+    if (kbActive) {
+        steerAnalogSmoothed = targetSteer;
+    } else {
+        const step = (dt !== undefined) ? STEER_SMOOTH_RATE * dt : 1;
+        steerAnalogSmoothed += (targetSteer - steerAnalogSmoothed) * Math.min(step, 1);
+    }
 
     return {
         forward:  kbUp    || touchState.forward,
