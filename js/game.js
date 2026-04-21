@@ -112,7 +112,7 @@ export function gameLoop(time) {
 
     /* fixed timestep physics */
     fixedStep.update(rawDt, (dt) => {
-        updateCar(player, getPlayerInput(), dt);
+        updateCar(player, getPlayerInput(dt), dt);
         updateCar(ai, getAIInput(ai), dt);
         updateBallPhysics(dt);
         carBallCollision(player, pCarMesh);

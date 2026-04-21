@@ -118,8 +118,12 @@ if (isTouchDevice) {
     });
 }
 
+/* ===== STEERING SMOOTHING ===== */
+let steerAnalogSmoothed = 0;
+const STEER_SMOOTH_RATE = 14; // ~1/14th second to converge
+
 /* ===== PLAYER INPUT ===== */
-export function getPlayerInput() {
+export function getPlayerInput(dt) {
     const kbLeft  = keys['KeyA'] || keys['ArrowLeft'];
     const kbRight = keys['KeyD'] || keys['ArrowRight'];
     const kbUp    = keys['KeyW'] || keys['ArrowUp'];
@@ -136,12 +140,16 @@ export function getPlayerInput() {
         if (kbRight) steerAnalog = -1;
     }
 
+    /* smooth toward target */
+    const step = (dt !== undefined) ? STEER_SMOOTH_RATE * dt : 1;
+    steerAnalogSmoothed += (steerAnalog - steerAnalogSmoothed) * Math.min(step, 1);
+
     return {
         forward:  kbUp    || touchState.forward,
         backward: kbDown  || touchState.backward,
         left:     kbLeft  || touchState.left,
         right:    kbRight || touchState.right,
-        steerAnalog,
+        steerAnalog: steerAnalogSmoothed,
         jump:     keys['Space'] || touchState.jump,
         boost:    keys['ShiftLeft'] || keys['ShiftRight'] || touchState.boost
     };

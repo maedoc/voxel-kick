@@ -49,13 +49,134 @@ const C_AFRI_PER_SEC = Math.log(CONST.C_AFRI) / Math.log(1/60);
 const BA_FRI_PER_SEC = Math.log(CONST.BA_FRI) / Math.log(1/60);
 const BG_FRI_PER_SEC = Math.log(CONST.BG_FRI) / Math.log(1/60);
 
-function getWallNormal(pos) {
-    const margin = CONST.CHX + 0.8;
-    if (pos.x > CONST.AW/2 - margin)  return new THREE.Vector3(-1, 0, 0);
-    if (pos.x < -CONST.AW/2 + margin) return new THREE.Vector3( 1, 0, 0);
-    if (pos.z > CONST.AL/2 - margin)  return new THREE.Vector3( 0, 0,-1);
-    if (pos.z < -CONST.AL/2 + margin) return new THREE.Vector3( 0, 0, 1);
+/* ===== RAMP SURFACE NORMAL =====
+ * Computes smooth cylinder normal for quarter-cylinder ramps.
+ * Normal points from surface INTO arena (convention: GRAV is negative,
+ * so GRAV*normal gives force TOWARD the surface).
+ */
+function getRampNormal(pos) {
+    const R = CONST.RAMP_RADIUS;
+    const margin = CONST.CHX + 1.2;
+
+    /* right wall ramp (x = +AW/2) */
+    if (pos.x > CONST.AW/2 - R - margin && pos.x < CONST.AW/2 + margin && pos.y < 2*R + CONST.CHY) {
+        const cx = CONST.AW/2 - R;
+        const contactX = pos.x;
+        const contactY = pos.y - CONST.CHY;
+        const dx = contactX - cx;
+        const dy = contactY - R;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d > 0.001) {
+            return new THREE.Vector3(-dx/d, -dy/d, 0).normalize();
+        }
+    }
+    /* left wall ramp (x = -AW/2) */
+    if (pos.x < -CONST.AW/2 + R + margin && pos.x > -CONST.AW/2 - margin && pos.y < 2*R + CONST.CHY) {
+        const cx = -CONST.AW/2 + R;
+        const contactX = pos.x;
+        const contactY = pos.y - CONST.CHY;
+        const dx = contactX - cx;
+        const dy = contactY - R;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d > 0.001) {
+            return new THREE.Vector3(-dx/d, -dy/d, 0).normalize();
+        }
+    }
+    /* front wall ramp (z = +AL/2) */
+    if (pos.z > CONST.AL/2 - R - margin && pos.z < CONST.AL/2 + margin && pos.y < 2*R + CONST.CHY) {
+        const cz = CONST.AL/2 - R;
+        const contactZ = pos.z;
+        const contactY = pos.y - CONST.CHY;
+        const dz = contactZ - cz;
+        const dy = contactY - R;
+        const d = Math.sqrt(dz*dz + dy*dy);
+        if (d > 0.001) {
+            return new THREE.Vector3(0, -dy/d, -dz/d).normalize();
+        }
+    }
+    /* back wall ramp (z = -AL/2) */
+    if (pos.z < -CONST.AL/2 + R + margin && pos.z > -CONST.AL/2 - margin && pos.y < 2*R + CONST.CHY) {
+        const cz = -CONST.AL/2 + R;
+        const contactZ = pos.z;
+        const contactY = pos.y - CONST.CHY;
+        const dz = contactZ - cz;
+        const dy = contactY - R;
+        const d = Math.sqrt(dz*dz + dy*dy);
+        if (d > 0.001) {
+            return new THREE.Vector3(0, -dy/d, -dz/d).normalize();
+        }
+    }
     return null;
+}
+
+/* ===== RAMP POSITION CONSTRAINT =====
+ * Pushes car contact point to cylinder surface when penetrating.
+ * Returns true if constraint was applied.
+ */
+function constrainToRamp(c) {
+    const R = CONST.RAMP_RADIUS;
+
+    /* right wall */
+    {
+        const cx = CONST.AW/2 - R;
+        const contactX = c.pos.x;
+        const contactY = c.pos.y - CONST.CHY;
+        const dx = contactX - cx;
+        const dy = contactY - R;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < R && d > 0.001 && dx > 0 && dy < 0) {
+            const f = R / d;
+            c.pos.x = cx + dx * f;
+            c.pos.y = R + dy * f + CONST.CHY;
+            return true;
+        }
+    }
+    /* left wall */
+    {
+        const cx = -CONST.AW/2 + R;
+        const contactX = c.pos.x;
+        const contactY = c.pos.y - CONST.CHY;
+        const dx = contactX - cx;
+        const dy = contactY - R;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < R && d > 0.001 && dx < 0 && dy < 0) {
+            const f = R / d;
+            c.pos.x = cx + dx * f;
+            c.pos.y = R + dy * f + CONST.CHY;
+            return true;
+        }
+    }
+    /* front wall */
+    {
+        const cz = CONST.AL/2 - R;
+        const contactZ = c.pos.z;
+        const contactY = c.pos.y - CONST.CHY;
+        const dz = contactZ - cz;
+        const dy = contactY - R;
+        const d = Math.sqrt(dz*dz + dy*dy);
+        if (d < R && d > 0.001 && dz > 0 && dy < 0) {
+            const f = R / d;
+            c.pos.z = cz + dz * f;
+            c.pos.y = R + dy * f + CONST.CHY;
+            return true;
+        }
+    }
+    /* back wall */
+    {
+        const cz = -CONST.AL/2 + R;
+        const contactZ = c.pos.z;
+        const contactY = c.pos.y - CONST.CHY;
+        const dz = contactZ - cz;
+        const dy = contactY - R;
+        const d = Math.sqrt(dz*dz + dy*dy);
+        if (d < R && d > 0.001 && dz < 0 && dy < 0) {
+            const f = R / d;
+            c.pos.z = cz + dz * f;
+            c.pos.y = R + dy * f + CONST.CHY;
+            return true;
+        }
+    }
+    return false;
 }
 
 /* ===== CAR PHYSICS ===== */
@@ -102,15 +223,19 @@ export function updateCar(c, input, dt) {
         c.vel.add(accDir);
     }
 
-    /* wall detection */
-    const wallNormal = getWallNormal(c.pos);
-    const onWall = wallNormal !== null && c.pos.y > 2.5;
-    c.onWall = onWall;
-    if (onWall) c.surfaceNormal = wallNormal;
+    /* surface detection */
+    const surfaceNormal = getRampNormal(c.pos);
+    c.onWall = surfaceNormal !== null;
+    if (surfaceNormal) {
+        c.surfaceNormal = surfaceNormal.clone();
+    } else {
+        c.surfaceNormal = new THREE.Vector3(0, 1, 0);
+    }
 
-    /* gravity / wall gravity */
-    if (onWall) {
-        c.vel.addScaledVector(wallNormal, CONST.GRAV * 0.35 * dt);
+    /* gravity along surface normal */
+    if (surfaceNormal) {
+        /* stronger gravity on ramp so car stays planted */
+        c.vel.addScaledVector(surfaceNormal, CONST.GRAV * 0.85 * dt);
     } else {
         c.vel.y += CONST.GRAV * dt;
     }
@@ -149,7 +274,7 @@ export function updateCar(c, input, dt) {
             else                     { c.flipType = 'up';    c.vel.y += CONST.J_VEL * 0.8; }
             c.jumpHeld = true;
         } else if (c.onWall && !c.jumpHeld) {
-            /* jump off wall */
+            /* jump off wall / ramp */
             const n = c.surfaceNormal || new THREE.Vector3(0, 1, 0);
             c.vel.addScaledVector(n, CONST.J_VEL * 1.2);
             c.onWall = false;
@@ -171,9 +296,21 @@ export function updateCar(c, input, dt) {
     /* integrate */
     c.pos.addScaledVector(c.vel, dt);
 
-    /* ground / wall collision */
+    /* ground / ramp / wall collision */
     const cr = Math.max(CONST.CHX, CONST.CHZ);
+    let wasConstrained = false;
 
+    /* ramp surface constraint */
+    if (constrainToRamp(c)) {
+        wasConstrained = true;
+        /* remove velocity component into surface */
+        const vDotN = c.vel.dot(c.surfaceNormal);
+        if (vDotN < 0) {
+            c.vel.addScaledVector(c.surfaceNormal, -vDotN);
+        }
+    }
+
+    /* flat floor */
     if (c.pos.y - CONST.CHY < 0) {
         const wasAir = !c.onGround;
         c.pos.y = CONST.CHY;
@@ -183,9 +320,17 @@ export function updateCar(c, input, dt) {
         c.isFlipping = false;
         c.flipHit = false;
         if (wasAir) c.accelRamp = 0;
+    } else if (wasConstrained) {
+        /* on ramp surface */
+        const wasAir = !c.onGround;
+        c.onGround = true;
+        c.canFlip = false;
+        c.isFlipping = false;
+        c.flipHit = false;
+        if (wasAir) c.accelRamp = 0;
     }
 
-    /* walls — bounce only if not wall-riding */
+    /* flat wall bounce for non-ramp areas */
     if (!c.onWall) {
         if (c.pos.x - cr < -CONST.AW/2) { c.pos.x = -CONST.AW/2 + cr; c.vel.x *= -0.3; }
         if (c.pos.x + cr >  CONST.AW/2) { c.pos.x =  CONST.AW/2 - cr; c.vel.x *= -0.3; }
@@ -193,11 +338,11 @@ export function updateCar(c, input, dt) {
         if (c.pos.z - cr < -CONST.AL/2) { c.pos.z = -CONST.AL/2 + cr; c.vel.z *= -0.3; }
         if (c.pos.z + cr >  CONST.AL/2) { c.pos.z =  CONST.AL/2 - cr; c.vel.z *= -0.3; }
     } else {
-        /* soft wall clamp while wall-riding */
-        if (c.pos.x < -CONST.AW/2 + cr) { c.pos.x = -CONST.AW/2 + cr; }
-        if (c.pos.x >  CONST.AW/2 - cr) { c.pos.x =  CONST.AW/2 - cr; }
-        if (c.pos.z < -CONST.AL/2 + cr) { c.pos.z = -CONST.AL/2 + cr; }
-        if (c.pos.z >  CONST.AL/2 - cr) { c.pos.z =  CONST.AL/2 - cr; }
+        /* soft clamp while on ramp — don't kill momentum */
+        if (c.pos.x < -CONST.AW/2 + cr) { c.pos.x = -CONST.AW/2 + cr; c.vel.x *= 0.85; }
+        if (c.pos.x >  CONST.AW/2 - cr) { c.pos.x =  CONST.AW/2 - cr; c.vel.x *= 0.85; }
+        if (c.pos.z < -CONST.AL/2 + cr) { c.pos.z = -CONST.AL/2 + cr; c.vel.z *= 0.85; }
+        if (c.pos.z >  CONST.AL/2 - cr) { c.pos.z =  CONST.AL/2 - cr; c.vel.z *= 0.85; }
         if (c.pos.y + CONST.CHY > CONST.AH) { c.pos.y = CONST.AH - CONST.CHY; c.vel.y *= -0.3; }
     }
 }
