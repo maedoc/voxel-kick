@@ -234,20 +234,100 @@ export function updateCar(c, input, dt) {
         if (wasAir) c.accelRamp = 0;
     }
 
-    /* walls — bounce only if not wall-riding */
+    /* wall riding — project car bottom onto ramp surface so it stays attached */
+    if (c.onWall && surfaceNormal) {
+        const R = CONST.RAMP_RADIUS;
+        const margin = CONST.CHX + 0.8;
+        let cx, cy, cz, projected = false;
+
+        if (c.pos.x > CONST.AW/2 - R - margin && c.pos.x < CONST.AW/2 + margin) {
+            cx = CONST.AW/2 - R; cy = R;
+            const dx = c.pos.x - cx;
+            const dy = (c.pos.y - CONST.CHY) - cy;
+            const d = Math.sqrt(dx*dx + dy*dy);
+            if (d > 0.001) {
+                const nx = dx/d, ny = dy/d;
+                const target = R + CONST.CHY * 0.5;
+                c.pos.x = cx + nx * target;
+                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                /* kill velocity into surface */
+                const vDotN = c.vel.x * nx + c.vel.y * ny;
+                if (vDotN < 0) {
+                    c.vel.x -= vDotN * nx;
+                    c.vel.y -= vDotN * ny;
+                }
+                projected = true;
+            }
+        } else if (c.pos.x < -CONST.AW/2 + R + margin && c.pos.x > -CONST.AW/2 - margin) {
+            cx = -CONST.AW/2 + R; cy = R;
+            const dx = c.pos.x - cx;
+            const dy = (c.pos.y - CONST.CHY) - cy;
+            const d = Math.sqrt(dx*dx + dy*dy);
+            if (d > 0.001) {
+                const nx = dx/d, ny = dy/d;
+                const target = R + CONST.CHY * 0.5;
+                c.pos.x = cx + nx * target;
+                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                const vDotN = c.vel.x * nx + c.vel.y * ny;
+                if (vDotN < 0) {
+                    c.vel.x -= vDotN * nx;
+                    c.vel.y -= vDotN * ny;
+                }
+                projected = true;
+            }
+        } else if (c.pos.z > CONST.AL/2 - R - margin && c.pos.z < CONST.AL/2 + margin) {
+            cz = CONST.AL/2 - R; cy = R;
+            const dz = c.pos.z - cz;
+            const dy = (c.pos.y - CONST.CHY) - cy;
+            const d = Math.sqrt(dz*dz + dy*dy);
+            if (d > 0.001) {
+                const nz = dz/d, ny = dy/d;
+                const target = R + CONST.CHY * 0.5;
+                c.pos.z = cz + nz * target;
+                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                const vDotN = c.vel.z * nz + c.vel.y * ny;
+                if (vDotN < 0) {
+                    c.vel.z -= vDotN * nz;
+                    c.vel.y -= vDotN * ny;
+                }
+                projected = true;
+            }
+        } else if (c.pos.z < -CONST.AL/2 + R + margin && c.pos.z > -CONST.AL/2 - margin) {
+            cz = -CONST.AL/2 + R; cy = R;
+            const dz = c.pos.z - cz;
+            const dy = (c.pos.y - CONST.CHY) - cy;
+            const d = Math.sqrt(dz*dz + dy*dy);
+            if (d > 0.001) {
+                const nz = dz/d, ny = dy/d;
+                const target = R + CONST.CHY * 0.5;
+                c.pos.z = cz + nz * target;
+                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                const vDotN = c.vel.z * nz + c.vel.y * ny;
+                if (vDotN < 0) {
+                    c.vel.z -= vDotN * nz;
+                    c.vel.y -= vDotN * ny;
+                }
+                projected = true;
+            }
+        }
+
+        /* hard outer clamp to prevent going through wall */
+        if (projected) {
+            if (c.pos.x < -CONST.AW/2 + cr) { c.pos.x = -CONST.AW/2 + cr; c.vel.x *= -0.3; }
+            if (c.pos.x >  CONST.AW/2 - cr) { c.pos.x =  CONST.AW/2 - cr; c.vel.x *= -0.3; }
+            if (c.pos.z < -CONST.AL/2 + cr) { c.pos.z = -CONST.AL/2 + cr; c.vel.z *= -0.3; }
+            if (c.pos.z >  CONST.AL/2 - cr) { c.pos.z =  CONST.AL/2 - cr; c.vel.z *= -0.3; }
+            if (c.pos.y + CONST.CHY > CONST.AH) { c.pos.y = CONST.AH - CONST.CHY; c.vel.y *= -0.3; }
+        }
+    }
+
+    /* flat wall bounce when not wall-riding */
     if (!c.onWall) {
         if (c.pos.x - cr < -CONST.AW/2) { c.pos.x = -CONST.AW/2 + cr; c.vel.x *= -0.3; }
         if (c.pos.x + cr >  CONST.AW/2) { c.pos.x =  CONST.AW/2 - cr; c.vel.x *= -0.3; }
         if (c.pos.y + CONST.CHY > CONST.AH) { c.pos.y = CONST.AH - CONST.CHY; c.vel.y *= -0.3; }
         if (c.pos.z - cr < -CONST.AL/2) { c.pos.z = -CONST.AL/2 + cr; c.vel.z *= -0.3; }
         if (c.pos.z + cr >  CONST.AL/2) { c.pos.z =  CONST.AL/2 - cr; c.vel.z *= -0.3; }
-    } else {
-        /* soft wall clamp while wall-riding */
-        if (c.pos.x < -CONST.AW/2 + cr) { c.pos.x = -CONST.AW/2 + cr; }
-        if (c.pos.x >  CONST.AW/2 - cr) { c.pos.x =  CONST.AW/2 - cr; }
-        if (c.pos.z < -CONST.AL/2 + cr) { c.pos.z = -CONST.AL/2 + cr; }
-        if (c.pos.z >  CONST.AL/2 - cr) { c.pos.z =  CONST.AL/2 - cr; }
-        if (c.pos.y + CONST.CHY > CONST.AH) { c.pos.y = CONST.AH - CONST.CHY; c.vel.y *= -0.3; }
     }
 }
 
@@ -292,6 +372,32 @@ export function updateBallPhysics(dt) {
     /* end walls with goal openings */
     endWallBall(-1);
     endWallBall( 1);
+
+    /* safety net: flat wall fallback if ball somehow escaped */
+    if (_ball.pos.x - r < -CONST.AW/2) {
+        _ball.pos.x = -CONST.AW/2 + r;
+        if (_ball.vel.x < 0) _ball.vel.x *= -CONST.W_REST;
+    }
+    if (_ball.pos.x + r > CONST.AW/2) {
+        _ball.pos.x = CONST.AW/2 - r;
+        if (_ball.vel.x > 0) _ball.vel.x *= -CONST.W_REST;
+    }
+    if (_ball.pos.z - r < -CONST.AL/2) {
+        const inGoalX = Math.abs(_ball.pos.x) < CONST.GW/2;
+        const inGoalY = _ball.pos.y < CONST.GH;
+        if (!inGoalX || !inGoalY) {
+            _ball.pos.z = -CONST.AL/2 + r;
+            if (_ball.vel.z < 0) _ball.vel.z *= -CONST.W_REST;
+        }
+    }
+    if (_ball.pos.z + r > CONST.AL/2) {
+        const inGoalX = Math.abs(_ball.pos.x) < CONST.GW/2;
+        const inGoalY = _ball.pos.y < CONST.GH;
+        if (!inGoalX || !inGoalY) {
+            _ball.pos.z = CONST.AL/2 - r;
+            if (_ball.vel.z > 0) _ball.vel.z *= -CONST.W_REST;
+        }
+    }
 
     /* angular velocity for visual rolling */
     _ball.angVel.set(-_ball.vel.z / r, 0, _ball.vel.x / r);
