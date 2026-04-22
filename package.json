@@ -1,0 +1,11 @@
+{
+  "name": "voxel-kick",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/physics.test.js"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}

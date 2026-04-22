@@ -54,7 +54,7 @@ const BG_FRI_PER_SEC = Math.log(CONST.BG_FRI) * 60;
  * the ramp (above ground, near the curved surface). Prevents cars on
  * the flat floor near walls from being treated as "on wall".
  */
-function getRampNormal(pos) {
+export function getRampNormal(pos) {
     const R = CONST.RAMP_RADIUS;
     const margin = CONST.CHX + 0.8;
     const contactY = pos.y - CONST.CHY;
@@ -65,8 +65,8 @@ function getRampNormal(pos) {
         const dx = pos.x - cx;
         const dy = contactY - R;
         const d = Math.sqrt(dx*dx + dy*dy);
-        /* must be in ramp quarter and near the surface, AND elevated above flat floor */
-        if (dx > 0.1 && dy < -0.1 && Math.abs(d - R) < 1.8 && contactY > 0.3) {
+        /* must be in ramp quarter and near the surface */
+        if (dx > 0.1 && dy < -0.1 && Math.abs(d - R) < 1.8) {
             return new THREE.Vector3(-dx/d, -dy/d, 0).normalize();
         }
     }
@@ -76,7 +76,7 @@ function getRampNormal(pos) {
         const dx = pos.x - cx;
         const dy = contactY - R;
         const d = Math.sqrt(dx*dx + dy*dy);
-        if (dx < -0.1 && dy < -0.1 && Math.abs(d - R) < 1.8 && contactY > 0.3) {
+        if (dx < -0.1 && dy < -0.1 && Math.abs(d - R) < 1.8) {
             return new THREE.Vector3(-dx/d, -dy/d, 0).normalize();
         }
     }
@@ -86,7 +86,7 @@ function getRampNormal(pos) {
         const dz = pos.z - cz;
         const dy = contactY - R;
         const d = Math.sqrt(dz*dz + dy*dy);
-        if (dz > 0.1 && dy < -0.1 && Math.abs(d - R) < 1.8 && contactY > 0.3) {
+        if (dz > 0.1 && dy < -0.1 && Math.abs(d - R) < 1.8) {
             return new THREE.Vector3(0, -dy/d, -dz/d).normalize();
         }
     }
@@ -96,7 +96,7 @@ function getRampNormal(pos) {
         const dz = pos.z - cz;
         const dy = contactY - R;
         const d = Math.sqrt(dz*dz + dy*dy);
-        if (dz < -0.1 && dy < -0.1 && Math.abs(d - R) < 1.8 && contactY > 0.3) {
+        if (dz < -0.1 && dy < -0.1 && Math.abs(d - R) < 1.8) {
             return new THREE.Vector3(0, -dy/d, -dz/d).normalize();
         }
     }
@@ -249,7 +249,7 @@ export function updateCar(c, input, dt) {
                 const nx = dx/d, ny = dy/d;
                 const target = R + CONST.CHY * 0.5;
                 c.pos.x = cx + nx * target;
-                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
                 /* kill velocity into surface */
                 const vDotN = c.vel.x * nx + c.vel.y * ny;
                 if (vDotN < 0) {
@@ -267,7 +267,7 @@ export function updateCar(c, input, dt) {
                 const nx = dx/d, ny = dy/d;
                 const target = R + CONST.CHY * 0.5;
                 c.pos.x = cx + nx * target;
-                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
                 const vDotN = c.vel.x * nx + c.vel.y * ny;
                 if (vDotN < 0) {
                     c.vel.x -= vDotN * nx;
@@ -284,7 +284,7 @@ export function updateCar(c, input, dt) {
                 const nz = dz/d, ny = dy/d;
                 const target = R + CONST.CHY * 0.5;
                 c.pos.z = cz + nz * target;
-                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
                 const vDotN = c.vel.z * nz + c.vel.y * ny;
                 if (vDotN < 0) {
                     c.vel.z -= vDotN * nz;
@@ -301,7 +301,7 @@ export function updateCar(c, input, dt) {
                 const nz = dz/d, ny = dy/d;
                 const target = R + CONST.CHY * 0.5;
                 c.pos.z = cz + nz * target;
-                c.pos.y = cy + ny * target + CONST.CHY * 0.5;
+                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
                 const vDotN = c.vel.z * nz + c.vel.y * ny;
                 if (vDotN < 0) {
                     c.vel.z -= vDotN * nz;

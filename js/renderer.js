@@ -150,18 +150,13 @@ export function createArena() {
         wall.castShadow = true;
         scene.add(wall);
 
-        /* quarter-cylinder ramp */
-        const rampGeo = new THREE.CylinderGeometry(R, R, wallLen, 24, 1, true, 0, Math.PI/2);
+        /* quarter-cylinder ramp — axis along Z, cross-section in X-Y */
+        const thetaStart = xSign < 0 ? Math.PI : 3 * Math.PI / 2;
+        const rampGeo = new THREE.CylinderGeometry(R, R, wallLen, 32, 1, true, thetaStart, Math.PI/2);
         const ramp = new THREE.Mesh(rampGeo, wm);
         ramp.castShadow = true;
-        if (xSign < 0) {
-            ramp.position.set(x + R, R, 0);
-            ramp.rotation.set(0, 0, -Math.PI/2);
-        } else {
-            ramp.position.set(x - R, R, 0);
-            ramp.rotation.set(0, 0, Math.PI/2);
-            ramp.scale.z = -1; /* flip inside face */
-        }
+        ramp.position.set(x - xSign * R, R, 0);
+        ramp.rotation.set(-Math.PI/2, 0, 0);
         scene.add(ramp);
     }
     sideWall(-1);
@@ -195,18 +190,13 @@ export function createArena() {
         ts.position.set(0, CONST.GH + (wallH - CONST.GH)/2 + R, z - zSign * wt/2);
         ts.castShadow = true; scene.add(ts);
 
-        /* quarter-cylinder ramp for end wall */
-        const rampGeo = new THREE.CylinderGeometry(R, R, CONST.AW, 24, 1, true, 0, Math.PI/2);
+        /* quarter-cylinder ramp — axis along X, cross-section in Y-Z */
+        const thetaStart = zSign < 0 ? Math.PI : Math.PI / 2;
+        const rampGeo = new THREE.CylinderGeometry(R, R, CONST.AW, 32, 1, true, thetaStart, Math.PI/2);
         const ramp = new THREE.Mesh(rampGeo, wm);
         ramp.castShadow = true;
-        if (zSign < 0) {
-            ramp.position.set(0, R, z + R);
-            ramp.rotation.set(Math.PI/2, 0, 0);
-        } else {
-            ramp.position.set(0, R, z - R);
-            ramp.rotation.set(-Math.PI/2, 0, 0);
-            ramp.scale.x = -1;
-        }
+        ramp.position.set(0, R, z - zSign * R);
+        ramp.rotation.set(0, 0, Math.PI/2);
         scene.add(ramp);
 
         /* goal box */

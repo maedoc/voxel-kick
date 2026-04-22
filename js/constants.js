@@ -33,4 +33,4 @@ export const F_MULT = 1.8;     // flip hit multiplier
 export const C_MASS = 5;
 export const BL_MASS = 1;
 export const GOAL_CD = 2.0;    // goal cooldown seconds
-export const RAMP_RADIUS = 4;  // wall ramp radius for wall riding
+export const RAMP_RADIUS = 30;  // wall ramp radius for wall riding
