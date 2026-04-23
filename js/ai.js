@@ -8,7 +8,13 @@ export function setAIRefs(ball, player) {
     _player = player;
 }
 
-export function getAIInput(ai) {
+/**
+ * Get AI input for the given AI car.
+ * @param {Object} ai - The AI car state object (must contain pos, rot, onGround, canFlip, boost, etc.)
+ * @param {any} world - Rapier world (currently unused but kept for future extensions)
+ * @returns {Object} input object compatible with applyCarInput
+ */
+export function getAIInput(ai, world) {
     const inp = { forward: false, backward: false, left: false, right: false, jump: false, boost: false };
 
     const toBall = _ball.pos.clone().sub(ai.pos);
@@ -37,12 +43,12 @@ export function getAIInput(ai) {
 
     if (distBall < 22 && Math.abs(angleDiff) < 0.35 && ai.boost > 25) inp.boost = true;
 
-    /* jump only when ball is actually elevated and within range (no random spam) */
+    // Jump only when ball is elevated and within range
     if (distBall < 6 && ai.onGround && _ball.pos.y > 2.5) {
         inp.jump = true;
     }
 
-    /* flip toward ball when in air near ball */
+    // Flip toward ball when in air near ball
     if (!ai.onGround && ai.canFlip && distBall < 8) {
         inp.jump = true;
         const toB = _ball.pos.clone().sub(ai.pos);

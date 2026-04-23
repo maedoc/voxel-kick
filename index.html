@@ -56,7 +56,6 @@ canvas { display: block; }
     z-index: 20;
     transform-origin: center center;
 }
-
 /* ===== TOUCH CONTROLS ===== */
 #touch-controls {
     display: none;
@@ -64,7 +63,6 @@ canvas { display: block; }
     pointer-events: none; z-index: 10;
 }
 #touch-controls.active { display: block; }
-
 /* Virtual joystick */
 #joystick-zone {
     position: absolute; left: 0; top: 0;
@@ -92,7 +90,6 @@ canvas { display: block; }
     transform: translate(-50%, -50%);
     pointer-events: none;
 }
-
 /* Action buttons (right side) */
 .touch-btn {
     position: absolute; pointer-events: auto;
@@ -144,14 +141,15 @@ canvas { display: block; }
 <script type="importmap">
 {
     "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"
     }
 }
 </script>
 <script type="module">
     import { initGame, gameLoop } from './js/game.js';
-    initGame();
-    requestAnimationFrame(gameLoop);
+    // initGame is async – wait for it before starting the render loop
+    initGame().then(() => requestAnimationFrame(gameLoop));
 </script>
 </body>
 </html>

@@ -1,9 +1,14 @@
 import * as THREE from 'three';
 import * as CONST from './constants.js';
 import {
-    FixedTimestep, setPhysicsState, updateCar, updateBallPhysics,
-    carBallCollision, carCarCollision, checkGoals, resetPositions
-} from './physics.js';
+    initPhysics,
+    applyCarInput,
+    stepWorld,
+    syncBodyToState,
+    checkGoals,
+    resetAll,
+    getOnGround
+} from './rapier-physics.js';
 import { getPlayerInput } from './input.js';
 import { setAIRefs, getAIInput } from './ai.js';
 import {
@@ -13,6 +18,25 @@ import {
     updateCarMesh, updateBallMesh, updateCamera, initCameraPosition,
     updateBallArrow
 } from './renderer.js';
+
+/* ===== FIXED TIMESTEP ===== */
+class FixedTimestep {
+    constructor(step = 1/60, maxSteps = 5) {
+        this.step = step;
+        this.maxSteps = maxSteps;
+        this.accumulator = 0;
+    }
+    update(dt, callback) {
+        this.accumulator += dt;
+        let steps = 0;
+        while (this.accumulator >= this.step && steps < this.maxSteps) {
+            callback(this.step);
+            this.accumulator -= this.step;
+            steps++;
+        }
+        return steps;
+    }
+}
 
 /* ===== GAME STATE ===== */
 export const player = {
@@ -53,6 +77,9 @@ let pCarMesh, aCarMesh, ballMesh;
 let pShadow, aShadow, bShadow;
 let goalArrows = [];
 
+/* ===== PHYSICS REFS ===== */
+let world, playerBody, aiBody, ballBody, playerCol, aiCol, ballCol;
+
 /* ===== HUD ===== */
 const boostFill = document.getElementById('boost-fill');
 const pScoreEl  = document.getElementById('p-score');
@@ -67,11 +94,11 @@ function updateHUD() {
 
 function showGoal() {
     goalOvEl.style.display = 'block';
-    resetPositions();
+    resetAll(playerBody, aiBody, ballBody, player, ai, ball);
 }
 
 /* ===== INIT ===== */
-export function initGame() {
+export async function initGame() {
     createArena();
     createScenery();
     goalArrows = createGoalIndicators();
@@ -90,10 +117,21 @@ export function initGame() {
     aShadow = new THREE.Mesh(shGeo, shMat); aShadow.rotation.x = -Math.PI/2; scene.add(aShadow);
     bShadow = new THREE.Mesh(shGeo.clone(), shMat); bShadow.rotation.x = -Math.PI/2; scene.add(bShadow);
 
-    /* wire physics module to state */
-    setPhysicsState(player, ai, ball, pScore, aScore, goalCD);
-    setAIRefs(ball, player);
+    /* rapier physics */
+    const phy = await initPhysics();
+    world = phy.world;
+    playerBody = phy.playerBody;
+    aiBody = phy.aiBody;
+    ballBody = phy.ballBody;
+    playerCol = phy.playerCol;
+    aiCol = phy.aiCol;
+    ballCol = phy.ballCol;
 
+    syncBodyToState(playerBody, player);
+    syncBodyToState(aiBody, ai);
+    syncBodyToState(ballBody, ball);
+
+    setAIRefs(ball, player);
     initCameraPosition(player);
 }
 
@@ -112,13 +150,22 @@ export function gameLoop(time) {
 
     /* fixed timestep physics */
     fixedStep.update(rawDt, (dt) => {
-        updateCar(player, getPlayerInput(dt), dt);
-        updateCar(ai, getAIInput(ai), dt);
-        updateBallPhysics(dt);
-        carBallCollision(player, pCarMesh);
-        carBallCollision(ai, aCarMesh);
-        carCarCollision();
-        if (checkGoals()) showGoal();
+        applyCarInput(playerBody, playerCol, getPlayerInput(dt), dt, player, world);
+
+        ai.onGround = getOnGround(aiBody, aiCol, world);
+        const aiInput = getAIInput(ai, world);
+        applyCarInput(aiBody, aiCol, aiInput, dt, ai, world);
+
+        stepWorld(world, dt);
+
+        syncBodyToState(playerBody, player);
+        syncBodyToState(aiBody, ai);
+        syncBodyToState(ballBody, ball);
+
+        player.onGround = getOnGround(playerBody, playerCol, world);
+        ai.onGround = getOnGround(aiBody, aiCol, world);
+
+        if (checkGoals(ballBody, pScore, aScore, goalCD)) showGoal();
     });
 
     /* meshes */
