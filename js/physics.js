@@ -105,6 +105,9 @@ export function getRampNormal(pos) {
 
 /* ===== CAR PHYSICS ===== */
 export function updateCar(c, input, dt) {
+    /* BUG B: reset onGround each tick so airborne cars don't stay grounded */
+    c.onGround = false;
+
     const f = fwd(c.rot);
     const right = new THREE.Vector3(Math.cos(c.rot), 0, -Math.sin(c.rot));
 
@@ -232,83 +235,45 @@ export function updateCar(c, input, dt) {
         c.isFlipping = false;
         c.flipHit = false;
         if (wasAir) c.accelRamp = 0;
+    } else {
+        /* BUG B: explicitly false when not touching ground */
+        c.onGround = false;
     }
 
-    /* wall riding — project car bottom onto ramp surface so it stays attached */
+    /* wall riding — project car bottom onto ramp surface using stored normal */
     if (c.onWall && surfaceNormal) {
         const R = CONST.RAMP_RADIUS;
-        const margin = CONST.CHX + 0.8;
-        let cx, cy, cz, projected = false;
+        const sn = c.surfaceNormal;
+        let projected = false;
 
-        if (c.pos.x > CONST.AW/2 - R - margin && c.pos.x < CONST.AW/2 + margin) {
-            cx = CONST.AW/2 - R; cy = R;
-            const dx = c.pos.x - cx;
-            const dy = (c.pos.y - CONST.CHY) - cy;
-            const d = Math.sqrt(dx*dx + dy*dy);
-            if (d > 0.001) {
-                const nx = dx/d, ny = dy/d;
-                const target = R + CONST.CHY * 0.5;
-                c.pos.x = cx + nx * target;
-                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
-                /* kill velocity into surface */
-                const vDotN = c.vel.x * nx + c.vel.y * ny;
-                if (vDotN < 0) {
-                    c.vel.x -= vDotN * nx;
-                    c.vel.y -= vDotN * ny;
-                }
-                projected = true;
-            }
-        } else if (c.pos.x < -CONST.AW/2 + R + margin && c.pos.x > -CONST.AW/2 - margin) {
-            cx = -CONST.AW/2 + R; cy = R;
-            const dx = c.pos.x - cx;
-            const dy = (c.pos.y - CONST.CHY) - cy;
-            const d = Math.sqrt(dx*dx + dy*dy);
-            if (d > 0.001) {
-                const nx = dx/d, ny = dy/d;
-                const target = R + CONST.CHY * 0.5;
-                c.pos.x = cx + nx * target;
-                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
-                const vDotN = c.vel.x * nx + c.vel.y * ny;
-                if (vDotN < 0) {
-                    c.vel.x -= vDotN * nx;
-                    c.vel.y -= vDotN * ny;
-                }
-                projected = true;
-            }
-        } else if (c.pos.z > CONST.AL/2 - R - margin && c.pos.z < CONST.AL/2 + margin) {
-            cz = CONST.AL/2 - R; cy = R;
-            const dz = c.pos.z - cz;
-            const dy = (c.pos.y - CONST.CHY) - cy;
-            const d = Math.sqrt(dz*dz + dy*dy);
-            if (d > 0.001) {
-                const nz = dz/d, ny = dy/d;
-                const target = R + CONST.CHY * 0.5;
-                c.pos.z = cz + nz * target;
-                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
-                const vDotN = c.vel.z * nz + c.vel.y * ny;
-                if (vDotN < 0) {
-                    c.vel.z -= vDotN * nz;
-                    c.vel.y -= vDotN * ny;
-                }
-                projected = true;
-            }
-        } else if (c.pos.z < -CONST.AL/2 + R + margin && c.pos.z > -CONST.AL/2 - margin) {
-            cz = -CONST.AL/2 + R; cy = R;
-            const dz = c.pos.z - cz;
-            const dy = (c.pos.y - CONST.CHY) - cy;
-            const d = Math.sqrt(dz*dz + dy*dy);
-            if (d > 0.001) {
-                const nz = dz/d, ny = dy/d;
-                const target = R + CONST.CHY * 0.5;
-                c.pos.z = cz + nz * target;
-                c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
-                const vDotN = c.vel.z * nz + c.vel.y * ny;
-                if (vDotN < 0) {
-                    c.vel.z -= vDotN * nz;
-                    c.vel.y -= vDotN * ny;
-                }
-                projected = true;
-            }
+        /* BUG A: use the SAME normal stored at detection time rather than
+         * recomputing from the (now-integrated) position. This eliminates
+         * jitter caused by gravity/friction moving the car between detection
+         * and projection. */
+        if (Math.abs(sn.x) > 0.01 && Math.abs(sn.z) < 0.01) {
+            /* X-wall (right or left) — sn points toward cylinder center */
+            const xSign = sn.x < 0 ? 1 : -1;
+            const cx = xSign * (CONST.AW/2 - R);
+            const cy = R;
+            const nx = -sn.x, ny = -sn.y;            /* outward normal */
+            const target = R + CONST.CHY * 0.5;
+            c.pos.x = cx + nx * target;
+            c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
+            const vDotN = c.vel.x * nx + c.vel.y * ny;
+            if (vDotN < 0) { c.vel.x -= vDotN * nx; c.vel.y -= vDotN * ny; }
+            projected = true;
+        } else if (Math.abs(sn.z) > 0.01 && Math.abs(sn.x) < 0.01) {
+            /* Z-wall (front or back) — sn points toward cylinder center */
+            const zSign = sn.z < 0 ? 1 : -1;
+            const cz = zSign * (CONST.AL/2 - R);
+            const cy = R;
+            const nz = -sn.z, ny = -sn.y;            /* outward normal */
+            const target = R + CONST.CHY * 0.5;
+            c.pos.z = cz + nz * target;
+            c.pos.y = Math.max(CONST.CHY, cy + ny * target + CONST.CHY * 0.5);
+            const vDotN = c.vel.z * nz + c.vel.y * ny;
+            if (vDotN < 0) { c.vel.z -= vDotN * nz; c.vel.y -= vDotN * ny; }
+            projected = true;
         }
 
         /* hard outer clamp to prevent going through wall */
@@ -449,6 +414,12 @@ function endWallBall(zSign) {
     const cz = wallZ - zSign * R;
     const cy = R;
 
+    /* BUG C: gate — only apply when ball is actually near this end wall.
+     * Prevents double-correction at corners where sideWallBall already
+     * handled the collision. */
+    if (zSign > 0 && _ball.pos.z + r < CONST.AL/2 - R * 2) return;
+    if (zSign < 0 && _ball.pos.z - r > -CONST.AL/2 + R * 2) return;
+
     /* goal opening check */
     const inGoalX = Math.abs(_ball.pos.x) < CONST.GW/2;
     const inGoalY = _ball.pos.y < CONST.GH;
@@ -514,8 +485,34 @@ export function carBallCollision(car, carMesh) {
     const dx = lx - cx, dy = ly - cy, dz = lz - cz;
     const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
 
-    if (dist < CONST.BR && dist > 0.001) {
-        let nx = dx / dist, ny = dy / dist, nz = dz / dist;
+    if (dist < CONST.BR) {
+        let nx, ny, nz;
+        if (dist > 0.001) {
+            /* normal from nearest OBB point to ball center, in local space */
+            nx = dx / dist; ny = dy / dist; nz = dz / dist;
+        } else {
+            /* BUG 2 fix: ball center is inside/on the OBB — use fallback normal.
+             * CLEANUP D: inline math instead of Vector3 allocations. */
+            let fx = _ball.pos.x - car.pos.x;
+            let fy = _ball.pos.y - car.pos.y;
+            let fz = _ball.pos.z - car.pos.z;
+            const fLenSq = fx*fx + fy*fy + fz*fz;
+            if (fLenSq > 0.0001) {
+                const fLen = Math.sqrt(fLenSq);
+                fx /= fLen; fy /= fLen; fz /= fLen;
+            } else {
+                fx = Math.sin(car.rot); fy = 0; fz = Math.cos(car.rot);
+            }
+            const cosR2 = Math.cos(-car.rot), sinR2 = Math.sin(-car.rot);
+            nx = fx * cosR2 - fz * sinR2;
+            nz = fx * sinR2 + fz * cosR2;
+            ny = fy;
+            const flen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+            if (flen > 0.001) { nx /= flen; ny /= flen; nz /= flen; }
+            else { nx = 0; ny = 1; nz = 0; }
+        }
+
+        /* rotate local normal back to world space */
         const cosR2 = Math.cos(car.rot), sinR2 = Math.sin(car.rot);
         const wnx = nx * cosR2 - nz * sinR2;
         const wnz = nx * sinR2 + nz * cosR2;
@@ -523,7 +520,7 @@ export function carBallCollision(car, carMesh) {
         const normal = new THREE.Vector3(wnx, wny, wnz);
 
         const overlap = CONST.BR - dist;
-        _ball.pos.addScaledVector(normal, overlap * 1.05);
+        _ball.pos.addScaledVector(normal, Math.max(overlap, CONST.BR * 0.5) * 1.05);
 
         const relVel = car.vel.clone().sub(_ball.vel);
         const velAlong = relVel.dot(normal);
@@ -532,7 +529,11 @@ export function carBallCollision(car, carMesh) {
         const e = 0.85;
         const j = -(1 + e) * velAlong / (1/CONST.C_MASS + 1/CONST.BL_MASS);
         let impulse = -j;
-        if (car.flipHit) impulse *= CONST.F_MULT;
+        if (car.flipHit) {
+            impulse *= CONST.F_MULT;
+            /* BUG 1 fix: consume flip hit on first contact only */
+            car.flipHit = false;
+        }
 
         _ball.vel.addScaledVector(normal, impulse / CONST.BL_MASS);
         car.vel.addScaledVector(normal, -impulse / CONST.C_MASS);
