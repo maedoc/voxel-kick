@@ -203,15 +203,13 @@ export async function initPhysics() {
         .setAngularDamping(10);
 
     const playerBody = world.createRigidBody(
-        carBodyDesc.setTranslation({ x: 0, y: C.CHY, z: 30 })
+        carBodyDesc.setTranslation(0, C.CHY, 30)
     );
-    playerBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-    // Set yaw rotation via quaternion for Math.PI (facing backward)
     const pq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
     playerBody.setRotation({ x: pq.x, y: pq.y, z: pq.z, w: pq.w }, true);
 
     const aiBody = world.createRigidBody(
-        carBodyDesc.setTranslation({ x: 0, y: C.CHY, z: -30 })
+        carBodyDesc.setTranslation(0, C.CHY, -30)
     );
 
     const carColDesc = RAPIER.ColliderDesc.cuboid(C.CHX, C.CHY, C.CHZ)
@@ -231,7 +229,7 @@ export async function initPhysics() {
     const ballBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
             .setCanSleep(false)
-            .setTranslation({ x: 0, y: C.BR, z: 0 })
+            .setTranslation(0, C.BR, 0)
             .setLinearDamping(0.05)
             .setAngularDamping(0.3)
     );
