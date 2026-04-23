@@ -203,6 +203,7 @@ export async function initPhysics() {
     /* ---------- Cars ---------- */
     const playerBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
+            .setCcdEnabled(true)
             .setCanSleep(false)
             .enabledRotations(false, true, false)
             .setLinearDamping(0)
@@ -214,6 +215,7 @@ export async function initPhysics() {
 
     const aiBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
+            .setCcdEnabled(true)
             .setCanSleep(false)
             .enabledRotations(false, true, false)
             .setLinearDamping(0)
@@ -235,6 +237,7 @@ export async function initPhysics() {
     /* ---------- Ball ---------- */
     const ballBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
+            .setCcdEnabled(true)
             .setCanSleep(false)
             .setTranslation(0, C.BR, 0)
             .setLinearDamping(0.05)
