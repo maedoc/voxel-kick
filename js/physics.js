@@ -251,8 +251,8 @@ export function updateCar(c, input, dt) {
          * jitter caused by gravity/friction moving the car between detection
          * and projection. */
         if (Math.abs(sn.x) > 0.01 && Math.abs(sn.z) < 0.01) {
-            /* X-wall (right or left) — sn points toward cylinder center */
-            const xSign = sn.x < 0 ? 1 : -1;
+            /* X-wall (right or left) — use position for robust wall sign */
+            const xSign = c.pos.x > 0 ? 1 : -1;
             const cx = xSign * (CONST.AW/2 - R);
             const cy = R;
             const nx = -sn.x, ny = -sn.y;            /* outward normal */
@@ -263,8 +263,8 @@ export function updateCar(c, input, dt) {
             if (vDotN < 0) { c.vel.x -= vDotN * nx; c.vel.y -= vDotN * ny; }
             projected = true;
         } else if (Math.abs(sn.z) > 0.01 && Math.abs(sn.x) < 0.01) {
-            /* Z-wall (front or back) — sn points toward cylinder center */
-            const zSign = sn.z < 0 ? 1 : -1;
+            /* Z-wall (front or back) — use position for robust wall sign */
+            const zSign = c.pos.z > 0 ? 1 : -1;
             const cz = zSign * (CONST.AL/2 - R);
             const cy = R;
             const nz = -sn.z, ny = -sn.y;            /* outward normal */
@@ -394,7 +394,11 @@ function sideWallBall(xSign) {
     const dy = _ball.pos.y - cy;
     const dist = Math.sqrt(dx*dx + dy*dy);
     const target = R - r;
-    if (dist > target && dist > 0.001) {
+    /* angular gate: only apply in the quarter-cylinder region.
+     * Right wall quarter: dx >= 0 (near wall), dy <= 0 (near ground)
+     * Left  wall quarter: dx <= 0 (near wall), dy <= 0 (near ground) */
+    const inQuarter = xSign > 0 ? (dx >= 0 && dy <= 0) : (dx <= 0 && dy <= 0);
+    if (inQuarter && dist > target && dist > 0.001) {
         const penetration = dist - target;
         const nx = -dx / dist;
         const ny = -dy / dist;
@@ -443,7 +447,11 @@ function endWallBall(zSign) {
     const dy = _ball.pos.y - cy;
     const dist = Math.sqrt(dz*dz + dy*dy);
     const target = R - r;
-    if (dist > target && dist > 0.001) {
+    /* angular gate: only apply in the quarter-cylinder region.
+     * Front wall quarter: dz >= 0 (near wall), dy <= 0 (near ground)
+     * Back  wall quarter: dz <= 0 (near wall), dy <= 0 (near ground) */
+    const inQuarter = zSign > 0 ? (dz >= 0 && dy <= 0) : (dz <= 0 && dy <= 0);
+    if (inQuarter && dist > target && dist > 0.001) {
         /* if inside goal opening, let it through unless hitting goal box */
         if (inGoalX && inGoalY) {
             goalBoxCollision(zSign);
