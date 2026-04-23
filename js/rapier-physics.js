@@ -196,20 +196,24 @@ export async function initPhysics() {
     );
 
     /* ---------- Cars ---------- */
-    const carBodyDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setCanSleep(false)
-        .enabledRotations(false, true, false)  // only Y rotation
-        .setLinearDamping(0)
-        .setAngularDamping(10);
-
     const playerBody = world.createRigidBody(
-        carBodyDesc.setTranslation(0, C.CHY, 30)
+        RAPIER.RigidBodyDesc.dynamic()
+            .setCanSleep(false)
+            .enabledRotations(false, true, false) // only Y rotation
+            .setLinearDamping(0)
+            .setAngularDamping(10)
+            .setTranslation(0, C.CHY, 30)
     );
     const pq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
     playerBody.setRotation({ x: pq.x, y: pq.y, z: pq.z, w: pq.w }, true);
 
     const aiBody = world.createRigidBody(
-        carBodyDesc.setTranslation(0, C.CHY, -30)
+        RAPIER.RigidBodyDesc.dynamic()
+            .setCanSleep(false)
+            .enabledRotations(false, true, false)
+            .setLinearDamping(0)
+            .setAngularDamping(10)
+            .setTranslation(0, C.CHY, -30)
     );
 
     const carColDesc = RAPIER.ColliderDesc.cuboid(C.CHX, C.CHY, C.CHZ)
