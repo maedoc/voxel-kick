@@ -394,15 +394,19 @@ function sideWallBall(xSign) {
     const dy = _ball.pos.y - cy;
     const dist = Math.sqrt(dx*dx + dy*dy);
     const target = R - r;
-    if (dist < target && dist > 0.001) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        _ball.pos.x = cx + nx * target;
-        _ball.pos.y = cy + ny * target;
-        const vDotN = _ball.vel.x * nx + _ball.vel.y * ny;
+    if (dist > target && dist > 0.001) {
+        const penetration = dist - target;
+        const nx = -dx / dist;
+        const ny = -dy / dist;
+        _ball.pos.x += nx * penetration;
+        _ball.pos.y += ny * penetration;
+        /* Use outward normal for velocity reflection */
+        const nwx = dx / dist;
+        const nwy = dy / dist;
+        const vDotN = _ball.vel.x * nwx + _ball.vel.y * nwy;
         if (vDotN < 0) {
-            _ball.vel.x -= (1 + CONST.W_REST) * vDotN * nx;
-            _ball.vel.y -= (1 + CONST.W_REST) * vDotN * ny;
+            _ball.vel.x -= (1 + CONST.W_REST) * vDotN * nwx;
+            _ball.vel.y -= (1 + CONST.W_REST) * vDotN * nwy;
         }
     }
 }
@@ -439,20 +443,24 @@ function endWallBall(zSign) {
     const dy = _ball.pos.y - cy;
     const dist = Math.sqrt(dz*dz + dy*dy);
     const target = R - r;
-    if (dist < target && dist > 0.001) {
+    if (dist > target && dist > 0.001) {
         /* if inside goal opening, let it through unless hitting goal box */
         if (inGoalX && inGoalY) {
             goalBoxCollision(zSign);
             return;
         }
-        const nz = dz / dist;
-        const ny = dy / dist;
-        _ball.pos.z = cz + nz * target;
-        _ball.pos.y = cy + ny * target;
-        const vDotN = _ball.vel.z * nz + _ball.vel.y * ny;
+        const penetration = dist - target;
+        const nz = -dz / dist;
+        const ny = -dy / dist;
+        _ball.pos.z += nz * penetration;
+        _ball.pos.y += ny * penetration;
+        /* Use outward normal for velocity reflection */
+        const nwz = dz / dist;
+        const nwy = dy / dist;
+        const vDotN = _ball.vel.z * nwz + _ball.vel.y * nwy;
         if (vDotN < 0) {
-            _ball.vel.z -= (1 + CONST.W_REST) * vDotN * nz;
-            _ball.vel.y -= (1 + CONST.W_REST) * vDotN * ny;
+            _ball.vel.z -= (1 + CONST.W_REST) * vDotN * nwz;
+            _ball.vel.y -= (1 + CONST.W_REST) * vDotN * nwy;
         }
     }
 }
