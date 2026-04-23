@@ -1,6 +1,6 @@
 /*
  * Rapier physics implementation for Voxel Kick.
- * Replaces hand-rolled physics with @dimforge/rapier3d-compat.
+ * Uses trimesh colliders for quarter-pipe ramp walls.
  */
 
 import * as RAPIER from '@dimforge/rapier3d-compat';
@@ -14,178 +14,183 @@ function fwd(rot) {
 }
 
 /**
- * Build an array of 3D points tracing a quarter-circle arc
- * that transitions from ground to wall.
+ * Build an extruded trimesh collider for a wall+ramp.
  *
- * For a RIGHT wall (x = +AW/2):
- *   cylinder centre = (AW/2 - R, R)
- *   arc from angle PI (ground level, x = cx - R, y = 0)
- *            to angle 3PI/2 (wall level, x = AW/2, y = R)
+ * The cross-section is a closed polygon in the (axisCoord, Y) plane:
+ *   - inner ground point → arc along quarter-cylinder → wall top → inner top → close
+ * Then extruded perpendicular to that plane over the given half-length.
  *
- * Returns points in CCW order to form a convex polygon cross-section.
+ * @param {number} sign    +1 for right/front wall, -1 for left/back
+ * @param {'x'|'z'} axis   which horizontal axis the wall is perpendicular to
+ * @param {number} halfLength  half-length of extrusion (arena extent along wall)
  */
-function rampArcPoints(sign, axis) {
-    // axis = 'x' for side walls, 'z' for end walls
-    // sign = +1 for right/front wall, -1 for left/back wall
+function buildWallRampTrimesh(sign, axis, halfLength) {
     const R = C.RAMP_RADIUS;
-    const halfA = axis === 'x' ? C.AW / 2 : C.AL / 2;
-    const cx = halfA - R; // distance from origin to cylinder centre along axis
+    const segs = 20;
+    const wallPos = axis === 'x' ? sign * C.AW / 2 : sign * C.AL / 2;
+    const cx = wallPos - sign * R;   // cylinder centre along axis
+    const cy = R;                     // cylinder centre Y
 
-    // For right wall: arc from PI to 3PI/2
-    // For left wall:  arc from PI/2 to PI
-    // Points are in the axis-Y plane (axis, y)
-    const segments = 12;
-    const points = [];
+    // Arc angles (ground → wall):
+    //   +sign walls: 3PI/2 → 2PI   (e.g. right wall arc goes from (cx,0) up to (wallPos,R))
+    //   -sign walls: PI → 3PI/2    (e.g. left wall arc goes from (cx,0) up to (wallPos,R))
+    const startA = sign > 0 ? 3 * Math.PI / 2 : Math.PI;
+    const endA   = sign > 0 ? 2 * Math.PI      : 3 * Math.PI / 2;
 
-    // Start point: ground level at the base of the ramp
-    // right wall: ground extends from x=0 to x=cx, y=0
-    // We need a polygon that forms the ramp shape:
-    // vertex at (0, 0), then along arc, then up the wall
-
-    // Ground-level vertex (inner edge of ramp base)
-    points.push({ x: 0, y: 0 }); // relative to wall position
-
-    // Arc points: for right wall, from angle PI to 3PI/2
-    // At angle PI: point is at (cx - R, R + 0) = (cx - R, 0) relative to cylinder center
-    // In absolute: (cx + R*cos(angle), R + R*sin(angle))
-    // At PI: (cx - R, 0) — ground level
-    // At 3PI/2: (cx, R) — wall level
-
-    const startAngle = sign > 0 ? Math.PI : Math.PI / 2;
-    const endAngle = sign > 0 ? 3 * Math.PI / 2 : Math.PI;
-
-    for (let i = 0; i <= segments; i++) {
-        const t = i / segments;
-        const angle = startAngle + t * (endAngle - startAngle);
-        const px = cx + R * Math.cos(angle); // position along axis
-        const py = R + R * Math.sin(angle);  // height
-        // Store relative to wall line (x=0 = wall surface)
-        const relAxis = sign > 0 ? (halfA - px) : (px - (-halfA));
-        points.push({ x: -relAxis * sign, y: py });
+    // Cross-section polygon (axisCoord, Y)
+    const cs = [];
+    cs.push([cx, 0]);                                       // inner ground
+    for (let i = 0; i <= segs; i++) {                       // arc
+        const a = startA + (i / segs) * (endA - startA);
+        cs.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
     }
+    cs.push([wallPos, C.AH]);                               // wall top
+    cs.push([cx, C.AH]);                                    // inner top
 
-    // Wall top vertex
-    points.push({ x: 0, y: C.AH });
-
-    // Inner corner at top
-    points.push({ x: -(halfA) * sign, y: C.AH });
-
-    // Inner corner at ground
-    points.push({ x: -(halfA) * sign, y: 0 });
-
-    return points;
+    return extrudeCrossSection(cs, axis, halfLength);
 }
 
 /**
- * Create a convex polygon collider for a wall+ramp cross-section,
- * extruded along the wall's length.
+ * Build an end-wall trimesh that leaves a goal opening in the centre.
+ * Same cross-section as a full wall but extruded only over the two
+ * flanking sections (left and right of the goal gap).
  */
-function createRampWallCollider(world, sign, axis, length) {
-    // Build the convex hull vertices for the cross-section
-    // We'll approximate with a polyline of cuboids instead,
-    // since Rapier convex polygon needs careful vertex ordering.
-
-    // Actually, let's use a simpler approach: create multiple cuboid
-    // segments that follow the quarter-circle curve.
-
+function buildEndWallTrimesh(zSign) {
     const R = C.RAMP_RADIUS;
-    const halfA = axis === 'x' ? C.AW / 2 : C.AL / 2;
-    const cx = halfA - R;
-    const wallThick = 0.5; // half-thickness of each segment
+    const segs = 20;
+    const wallZ = zSign * C.AL / 2;
+    const cx = wallZ - zSign * R;
+    const cy = R;
+    const startA = zSign > 0 ? 3 * Math.PI / 2 : Math.PI;
+    const endA   = zSign > 0 ? 2 * Math.PI      : 3 * Math.PI / 2;
 
-    // Create segments along the arc
-    const segments = 12;
-    const startAngle = sign > 0 ? Math.PI : Math.PI / 2;
-    const endAngle = sign > 0 ? 3 * Math.PI / 2 : Math.PI;
+    // Cross-section in (Z, Y) plane
+    const cs = [];
+    cs.push([cx, 0]);
+    for (let i = 0; i <= segs; i++) {
+        const a = startA + (i / segs) * (endA - startA);
+        cs.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+    }
+    cs.push([wallZ, C.AH]);
+    cs.push([cx, C.AH]);
 
-    for (let i = 0; i < segments; i++) {
-        const t0 = i / segments;
-        const t1 = (i + 1) / segments;
-        const a0 = startAngle + t0 * (endAngle - startAngle);
-        const a1 = startAngle + t1 * (endAngle - startAngle);
+    // Two sections flanking the goal opening
+    const sideW = (C.AW - C.GW) / 2;
+    const results = [];
+    for (const xCentre of [-C.AW / 2 + sideW / 2, C.AW / 2 - sideW / 2]) {
+        // Extrude cross-section along X around xCentre
+        const { vertices, indices } = extrudeCrossSection(cs, 'z', sideW / 2);
+        // Offset x vertices to centre around xCentre instead of origin
+        for (let i = 0; i < vertices.length; i += 3) {
+            vertices[i] += xCentre;
+        }
+        results.push({ vertices, indices });
+    }
+    return results;
+}
 
-        // Centre of this segment
-        const aMid = (a0 + a1) / 2;
-        const segCx = cx + R * Math.cos(aMid);
-        const segCy = R + R * Math.sin(aMid);
+/**
+ * Extrude a 2D cross-section polygon into a 3D trimesh.
+ * Cross-section is in the (axisCoord, Y) plane.
+ * axis='x' → extrude along Z,  axis='z' → extrude along X.
+ *
+ * Returns { vertices: Float32Array, indices: Uint32Array }.
+ */
+function extrudeCrossSection(cs, axis, halfLen) {
+    const n = cs.length;
+    const verts = new Float32Array(n * 2 * 3);
 
-        // Segment dimensions
-        const segLen = R * Math.abs(a1 - a0); // arc length
-        const segThick = 1.0; // thickness of ramp surface
-
-        // Normal direction at midpoint (pointing inward toward arena)
-        const nx = -Math.cos(aMid) * sign;
-        const ny = -Math.sin(aMid);
-
-        // Position: on the arc surface, offset inward by half thickness
-        const posX = segCx + nx * segThick * 0.5;
-        const posY = segCy + ny * segThick * 0.5;
-
-        // Rotation: angle of the surface normal
-        const rotAngle = Math.atan2(-nx, ny); // angle from vertical
-
+    for (let i = 0; i < n; i++) {
+        const [a, b] = cs[i];
+        const fi = i * 3;
+        const bi = (n + i) * 3;
         if (axis === 'x') {
-            // Side wall: segment extends along Z
-            const desc = RAPIER.ColliderDesc.cuboid(segThick / 2, segLen / 2, length / 2)
-                .setTranslation(sign > 0 ? (halfA - posX) * sign + halfA - (halfA - posX) : posX, posY, 0)
-                .setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -rotAngle * sign))
-                .setRestitution(C.W_REST)
-                .setFriction(0.8);
-            world.createCollider(desc);
+            // front face z = +halfLen, back face z = -halfLen
+            verts[fi] = a; verts[fi + 1] = b; verts[fi + 2] =  halfLen;
+            verts[bi] = a; verts[bi + 1] = b; verts[bi + 2] = -halfLen;
         } else {
-            // End wall: segment extends along X
-            const desc = RAPIER.ColliderDesc.cuboid(length / 2, segLen / 2, segThick / 2)
-                .setTranslation(0, posY, sign > 0 ? (halfA - posX) * sign + halfA - (halfA - posX) : posX)
-                .setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), rotAngle * sign))
-                .setRestitution(C.W_REST)
-                .setFriction(0.8);
-            world.createCollider(desc);
+            // front face x = +halfLen, back face x = -halfLen
+            verts[fi] =  halfLen; verts[fi + 1] = b; verts[fi + 2] = a;
+            verts[bi] = -halfLen; verts[bi + 1] = b; verts[bi + 2] = a;
         }
     }
 
-    // Flat wall above ramp
-    const wallH = C.AH - R;
-    const wallY = R + wallH / 2;
-    if (axis === 'x') {
-        const desc = RAPIER.ColliderDesc.cuboid(wallThick, wallH / 2, length / 2)
-            .setTranslation(sign * halfA, wallY, 0)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8);
-        world.createCollider(desc);
-    } else {
-        const desc = RAPIER.ColliderDesc.cuboid(length / 2, wallH / 2, wallThick)
-            .setTranslation(0, wallY, sign * halfA)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8);
-        world.createCollider(desc);
+    const idx = [];
+    // Front face (CCW)
+    for (let i = 1; i < n - 1; i++) idx.push(0, i, i + 1);
+    // Back face (reversed)
+    for (let i = 1; i < n - 1; i++) idx.push(n, n + i + 1, n + i);
+    // Side faces
+    for (let i = 0; i < n - 1; i++) {
+        idx.push(i, i + 1, n + i + 1);
+        idx.push(i, n + i + 1, n + i);
     }
+
+    return { vertices: verts, indices: new Uint32Array(idx) };
 }
 
 /* ===== INIT ===== */
 
 export async function initPhysics() {
-    await RAPIER.init();
+    await RAPIER.init({});
     const world = new RAPIER.World({ x: 0, y: C.GRAV, z: 0 });
 
     /* ---------- Floor ---------- */
     world.createCollider(
-        RAPIER.ColliderDesc.cuboid(C.AW / 2 + 2, 0.5, C.AL / 2 + C.GD * 2 + 2)
+        RAPIER.ColliderDesc.cuboid(C.AW / 2 + 5, 0.5, C.AL / 2 + C.GD * 2 + 5)
             .setTranslation(0, -0.5, 0)
             .setRestitution(0.3)
             .setFriction(0.7)
     );
 
-    /* ---------- Side walls with ramps ---------- */
-    // Right wall ramp (+X)
-    buildRampSegments(world, +1, 'x', C.AL + C.GD * 2);
-    // Left wall ramp (-X)
-    buildRampSegments(world, -1, 'x', C.AL + C.GD * 2);
+    /* ---------- Side walls (left / right) ---------- */
+    for (const sign of [+1, -1]) {
+        const { vertices, indices } = buildWallRampTrimesh(sign, 'x', (C.AL + C.GD * 2) / 2);
+        world.createCollider(
+            RAPIER.ColliderDesc.trimesh(vertices, indices)
+                .setRestitution(C.W_REST)
+                .setFriction(0.8)
+        );
+    }
 
-    /* ---------- End walls with goal openings ---------- */
-    // Front wall (+Z) — two sections flanking the goal + section above goal
-    buildEndWallWithGoal(world, +1);
-    // Back wall (-Z)
-    buildEndWallWithGoal(world, -1);
+    /* ---------- End walls (front / back) with goal openings ---------- */
+    for (const zSign of [+1, -1]) {
+        const sections = buildEndWallTrimesh(zSign);
+        for (const { vertices, indices } of sections) {
+            world.createCollider(
+                RAPIER.ColliderDesc.trimesh(vertices, indices)
+                    .setRestitution(C.W_REST)
+                    .setFriction(0.8)
+            );
+        }
+
+        /* Goal box */
+        const goalZ = zSign * (C.AL / 2 + C.GD / 2);
+        // Back wall of goal
+        world.createCollider(
+            RAPIER.ColliderDesc.cuboid(C.GW / 2 + 0.5, C.GH / 2, 0.5)
+                .setTranslation(0, C.GH / 2, zSign * (C.AL / 2 + C.GD))
+                .setRestitution(C.W_REST).setFriction(0.8)
+        );
+        // Left side
+        world.createCollider(
+            RAPIER.ColliderDesc.cuboid(0.5, C.GH / 2, C.GD / 2)
+                .setTranslation(-C.GW / 2 - 0.5, C.GH / 2, goalZ)
+                .setRestitution(C.W_REST).setFriction(0.8)
+        );
+        // Right side
+        world.createCollider(
+            RAPIER.ColliderDesc.cuboid(0.5, C.GH / 2, C.GD / 2)
+                .setTranslation(C.GW / 2 + 0.5, C.GH / 2, goalZ)
+                .setRestitution(C.W_REST).setFriction(0.8)
+        );
+        // Top
+        world.createCollider(
+            RAPIER.ColliderDesc.cuboid(C.GW / 2 + 0.5, 0.5, C.GD / 2)
+                .setTranslation(0, C.GH + 0.5, goalZ)
+                .setRestitution(C.W_REST).setFriction(0.8)
+        );
+    }
 
     /* ---------- Ceiling ---------- */
     world.createCollider(
@@ -199,7 +204,7 @@ export async function initPhysics() {
     const playerBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
             .setCanSleep(false)
-            .enabledRotations(false, true, false) // only Y rotation
+            .enabledRotations(false, true, false)
             .setLinearDamping(0)
             .setAngularDamping(10)
             .setTranslation(0, C.CHY, 30)
@@ -216,16 +221,14 @@ export async function initPhysics() {
             .setTranslation(0, C.CHY, -30)
     );
 
-    const carColDesc = RAPIER.ColliderDesc.cuboid(C.CHX, C.CHY, C.CHZ)
-        .setMass(C.C_MASS)
-        .setRestitution(0.2)
-        .setFriction(0.8);
-    const playerCol = world.createCollider(carColDesc, playerBody);
+    const playerCol = world.createCollider(
+        RAPIER.ColliderDesc.cuboid(C.CHX, C.CHY, C.CHZ)
+            .setMass(C.C_MASS).setRestitution(0.2).setFriction(0.8),
+        playerBody
+    );
     const aiCol = world.createCollider(
         RAPIER.ColliderDesc.cuboid(C.CHX, C.CHY, C.CHZ)
-            .setMass(C.C_MASS)
-            .setRestitution(0.2)
-            .setFriction(0.8),
+            .setMass(C.C_MASS).setRestitution(0.2).setFriction(0.8),
         aiBody
     );
 
@@ -239,250 +242,16 @@ export async function initPhysics() {
     );
     const ballCol = world.createCollider(
         RAPIER.ColliderDesc.ball(C.BR)
-            .setMass(C.BL_MASS)
-            .setRestitution(C.B_REST)
-            .setFriction(0.9),
+            .setMass(C.BL_MASS).setRestitution(C.B_REST).setFriction(0.9),
         ballBody
     );
 
     return { world, playerBody, playerCol, aiBody, aiCol, ballBody, ballCol };
 }
 
-/**
- * Build ramp segments for a side wall (X-axis walls).
- * Creates cuboid segments that follow the quarter-circle from floor to wall.
- */
-function buildRampSegments(world, xSign, axis, length) {
-    const R = C.RAMP_RADIUS;
-    const halfA = axis === 'x' ? C.AW / 2 : C.AL / 2;
-    const cx = halfA - R;  // cylinder centre distance from origin
-    const segments = 16;
-    const thick = 1.2;     // half-thickness of each ramp segment
-
-    // Arc from ground to wall level
-    // Right wall: angles from PI (ground) to 3PI/2 (wall)
-    // Left wall: angles from PI/2 (wall) to PI (ground)
-    const startAngle = xSign > 0 ? Math.PI : Math.PI / 2;
-    const endAngle = xSign > 0 ? 3 * Math.PI / 2 : Math.PI;
-
-    for (let i = 0; i < segments; i++) {
-        const t0 = i / segments;
-        const t1 = (i + 1) / segments;
-        const a0 = startAngle + t0 * (endAngle - startAngle);
-        const a1 = startAngle + t1 * (endAngle - startAngle);
-        const aMid = (a0 + a1) / 2;
-        const dAngle = Math.abs(a1 - a0);
-
-        // Position on arc at midpoint
-        const arcX = cx + R * Math.cos(aMid);
-        const arcY = R + R * Math.sin(aMid);
-
-        // Surface tangent length
-        const segLen = R * dAngle;
-
-        // Surface normal at midpoint (pointing toward arena interior)
-        const nx = -Math.cos(aMid);
-        const ny = -Math.sin(aMid);
-
-        // Offset position inward by half thickness
-        const posX = arcX + nx * thick * 0.3;
-        const posY = arcY + ny * thick * 0.3;
-
-        // Rotation angle of this segment (surface tilt)
-        // The surface tangent direction is perpendicular to the normal
-        const surfAngle = Math.atan2(ny, nx) - Math.PI / 2; // tangent angle
-
-        if (axis === 'x') {
-            // Side wall: extends along Z
-            const desc = RAPIER.ColliderDesc.cuboid(thick, segLen / 2, length / 2)
-                .setTranslation(posX * (xSign > 0 ? 1 : 1), posY, 0)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8);
-            // Rotate around Z to match surface tilt
-            if (Math.abs(surfAngle) > 0.01) {
-                const q = new THREE.Quaternion().setFromAxisAngle(
-                    new THREE.Vector3(0, 0, xSign), surfAngle
-                );
-                desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
-            }
-            world.createCollider(desc);
-        } else {
-            // End wall: extends along X
-            const desc = RAPIER.ColliderDesc.cuboid(length / 2, segLen / 2, thick)
-                .setTranslation(0, posY, posX)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8);
-            if (Math.abs(surfAngle) > 0.01) {
-                const q = new THREE.Quaternion().setFromAxisAngle(
-                    new THREE.Vector3(xSign, 0, 0), surfAngle
-                );
-                desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
-            }
-            world.createCollider(desc);
-        }
-    }
-
-    // Flat wall section above the ramp
-    const wallH = C.AH - R;
-    const wallY = R + wallH / 2;
-    if (axis === 'x') {
-        world.createCollider(
-            RAPIER.ColliderDesc.cuboid(0.5, wallH / 2, length / 2)
-                .setTranslation(xSign * halfA, wallY, 0)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8)
-        );
-    } else {
-        world.createCollider(
-            RAPIER.ColliderDesc.cuboid(length / 2, wallH / 2, 0.5)
-                .setTranslation(0, wallY, xSign * halfA)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8)
-        );
-    }
-}
-
-/**
- * Build end wall with goal opening.
- * Creates ramp segments + flat wall sections with a gap for the goal.
- */
-function buildEndWallWithGoal(world, zSign) {
-    const R = C.RAMP_RADIUS;
-    const halfL = C.AL / 2;
-    const cz = halfL - R;
-
-    // Ramp segments along the end wall — full width but we'll skip
-    // the goal area and add separate flat wall sections flanking the goal.
-    const segments = 16;
-    const thick = 1.2;
-    const startAngle = zSign > 0 ? Math.PI : Math.PI / 2;
-    const endAngle = zSign > 0 ? 3 * Math.PI / 2 : Math.PI;
-
-    // Ramp — only create segments where NOT in the goal opening
-    // Goal opening is at x = [-GW/2, GW/2], y = [0, GH]
-    // The ramp is at y < R, so it's always below GH (GH=15, R=30)
-    // We need to split the ramp into left-of-goal, right-of-goal sections
-    // Actually for simplicity, create the full ramp and let the ball pass
-    // through the gap above the ramp where the goal opening is.
-    // The ramp only goes up to y=R=30, and the goal top is at GH=15,
-    // so the ramp is actually TALLER than the goal opening.
-    // We need to leave a gap in both the ramp AND the flat wall above.
-
-    // Simpler approach: create the ramp and wall as full width,
-    // then add goal box colliders BEHIND the wall that catch the ball.
-    // The ball will enter through the goal opening (no collider there).
-
-    // Ramp segments — full width of arena
-    for (let i = 0; i < segments; i++) {
-        const t0 = i / segments;
-        const t1 = (i + 1) / segments;
-        const a0 = startAngle + t0 * (endAngle - startAngle);
-        const a1 = startAngle + t1 * (endAngle - startAngle);
-        const aMid = (a0 + a1) / 2;
-        const dAngle = Math.abs(a1 - a0);
-
-        const arcZ = cz + R * Math.cos(aMid);
-        const arcY = R + R * Math.sin(aMid);
-        const segLen = R * dAngle;
-
-        const nx = -Math.cos(aMid);
-        const ny = -Math.sin(aMid);
-        const posX = arcZ + nx * thick * 0.3;
-        const posY = arcY + ny * thick * 0.3;
-        const surfAngle = Math.atan2(ny, nx) - Math.PI / 2;
-
-        // Left section: x from -AW/2 to -GW/2
-        const leftW = (C.AW - C.GW) / 2;
-        const leftCx = -C.AW / 2 + leftW / 2;
-
-        // Right section: x from GW/2 to AW/2
-        const rightCx = C.AW / 2 - leftW / 2;
-
-        // Create left and right ramp segments (skip goal opening width)
-        for (const cx of [leftCx, rightCx]) {
-            const desc = RAPIER.ColliderDesc.cuboid(leftW / 2, segLen / 2, thick)
-                .setTranslation(cx, posY, posX)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8);
-            if (Math.abs(surfAngle) > 0.01) {
-                const q = new THREE.Quaternion().setFromAxisAngle(
-                    new THREE.Vector3(zSign, 0, 0), surfAngle
-                );
-                desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
-            }
-            world.createCollider(desc);
-        }
-    }
-
-    // Flat wall above ramp — left and right of goal
-    const wallH = C.AH - R;
-    const wallY = R + wallH / 2;
-    const sideW = (C.AW - C.GW) / 2;
-
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(sideW / 2, wallH / 2, 0.5)
-            .setTranslation(-C.AW / 2 + sideW / 2, wallY, zSign * halfL)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(sideW / 2, wallH / 2, 0.5)
-            .setTranslation(C.AW / 2 - sideW / 2, wallY, zSign * halfL)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-
-    // Wall section above goal opening
-    const aboveH = C.AH - C.GH;
-    if (aboveH > 0) {
-        world.createCollider(
-            RAPIER.ColliderDesc.cuboid(C.GW / 2, aboveH / 2, 0.5)
-                .setTranslation(0, C.GH + aboveH / 2, zSign * halfL)
-                .setRestitution(C.W_REST)
-                .setFriction(0.8)
-        );
-    }
-
-    /* Goal box — behind the wall opening */
-    const goalZ = zSign * (halfL + C.GD / 2);
-
-    // Back of goal
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(C.GW / 2 + 0.5, C.GH / 2, 0.5)
-            .setTranslation(0, C.GH / 2, zSign * (halfL + C.GD))
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-
-    // Left side of goal
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(0.5, C.GH / 2, C.GD / 2)
-            .setTranslation(-C.GW / 2 - 0.5, C.GH / 2, goalZ)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-
-    // Right side of goal
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(0.5, C.GH / 2, C.GD / 2)
-            .setTranslation(C.GW / 2 + 0.5, C.GH / 2, goalZ)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-
-    // Top of goal
-    world.createCollider(
-        RAPIER.ColliderDesc.cuboid(C.GW / 2 + 0.5, 0.5, C.GD / 2)
-            .setTranslation(0, C.GH + 0.5, goalZ)
-            .setRestitution(C.W_REST)
-            .setFriction(0.8)
-    );
-}
-
 /* ===== CAR INPUT ===== */
 
 export function applyCarInput(body, collider, input, dt, carState, world) {
-    // Read current state from body
     const pos = body.translation();
     const lv = body.linvel();
     const rq = body.rotation();
@@ -509,18 +278,14 @@ export function applyCarInput(body, collider, input, dt, carState, world) {
     const turnFactor = Math.max(0.35, 1.0 - speed / (C.C_MAX * 0.55));
     carState.rot += effectiveSteer * C.C_TURN * turnFactor * dt;
 
-    // Update body rotation
-    const newQuat = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0), carState.rot
-    );
+    const newQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), carState.rot);
     body.setRotation({ x: newQuat.x, y: newQuat.y, z: newQuat.z, w: newQuat.w }, true);
 
-    // Acceleration direction
+    // Acceleration
     const accDir = new THREE.Vector3();
-    if (input.forward) accDir.add(fwdVec);
-    if (input.backward) accDir.sub(fwdVec);
+    if (input.forward)  accDir.add(fwd(carState.rot));
+    if (input.backward) accDir.sub(fwd(carState.rot));
 
-    // Gradual acceleration ramp
     if (accDir.lengthSq() > 0) {
         carState.accelRamp = Math.min(1, carState.accelRamp + dt / 0.25);
     } else {
@@ -552,17 +317,14 @@ export function applyCarInput(body, collider, input, dt, carState, world) {
             carState.canFlip = true;
             carState.jumpHeld = true;
         } else if (carState.canFlip && !carState.jumpHeld) {
-            // Aerial flip
             carState.canFlip = false;
             carState.isFlipping = true;
             carState.flipTimer = C.F_DUR;
             carState.flipHit = true;
             const ff = fwd(carState.rot);
-            const rr = new THREE.Vector3(Math.cos(carState.rot), 0, -Math.sin(carState.rot));
-            let flipImpulse = { x: 0, y: C.J_VEL * C.C_MASS * 0.3, z: 0 };
-            if (input.forward) flipImpulse = { x: ff.x * C.F_VEL * C.C_MASS, y: C.F_VEL * C.C_MASS * 0.35, z: ff.z * C.F_VEL * C.C_MASS };
-            else if (input.backward) flipImpulse = { x: -ff.x * C.F_VEL * C.C_MASS, y: C.F_VEL * C.C_MASS * 0.35, z: -ff.z * C.F_VEL * C.C_MASS };
-            body.applyImpulse(flipImpulse, true);
+            if (input.forward)       body.applyImpulse({ x:  ff.x * C.F_VEL * C.C_MASS, y: C.F_VEL * C.C_MASS * 0.35, z:  ff.z * C.F_VEL * C.C_MASS }, true);
+            else if (input.backward) body.applyImpulse({ x: -ff.x * C.F_VEL * C.C_MASS, y: C.F_VEL * C.C_MASS * 0.35, z: -ff.z * C.F_VEL * C.C_MASS }, true);
+            else                     body.applyImpulse({ x: 0, y: C.J_VEL * C.C_MASS * 0.3, z: 0 }, true);
             carState.jumpHeld = true;
         }
     } else {
@@ -575,10 +337,7 @@ export function applyCarInput(body, collider, input, dt, carState, world) {
     // Flip timer
     if (carState.flipTimer > 0) {
         carState.flipTimer -= dt;
-        if (carState.flipTimer <= 0) {
-            carState.isFlipping = false;
-            carState.flipHit = false;
-        }
+        if (carState.flipTimer <= 0) { carState.isFlipping = false; carState.flipHit = false; }
     }
 
     // Speed cap
@@ -589,7 +348,7 @@ export function applyCarInput(body, collider, input, dt, carState, world) {
         body.setLinvel({ x: vel.x * s, y: vel.y, z: vel.z * s }, true);
     }
 
-    // Friction (damping)
+    // Friction
     const friction = carState.onGround ? 0.975 : 0.985;
     const dampFactor = Math.exp(Math.log(friction) * dt * 60);
     const v = body.linvel();
@@ -617,17 +376,11 @@ export function syncBodyToState(body, stateObj) {
 export function checkGoals(ballBody, pScore, aScore, goalCD) {
     if (goalCD.v > 0) return false;
     const p = ballBody.translation();
-    // Player scores in back goal (z < -AL/2)
     if (p.z < -C.AL / 2 - 1 && Math.abs(p.x) < C.GW / 2 && p.y < C.GH) {
-        pScore.v++;
-        goalCD.v = C.GOAL_CD;
-        return true;
+        pScore.v++; goalCD.v = C.GOAL_CD; return true;
     }
-    // AI scores in front goal (z > +AL/2)
     if (p.z > C.AL / 2 + 1 && Math.abs(p.x) < C.GW / 2 && p.y < C.GH) {
-        aScore.v++;
-        goalCD.v = C.GOAL_CD;
-        return true;
+        aScore.v++; goalCD.v = C.GOAL_CD; return true;
     }
     return false;
 }
@@ -648,7 +401,6 @@ export function resetAll(playerBody, aiBody, ballBody, playerState, aiState, bal
     ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
-    // Reset state objects
     for (const s of [playerState, aiState]) {
         s.vel.set(0, 0, 0);
         s.boost = C.B_MAX;
